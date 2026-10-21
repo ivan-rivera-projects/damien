@@ -6,8 +6,15 @@ import pytest
 
 from damien.decide import DEFAULT_SPEC
 from damien.jev import FakeJudge
-from damien.models import Action, Message, Source
-from damien.plan import apply_plan, approve, build_plan, load_messages, sample_plan, undo_run
+from damien.models import Action, Message, PlanItem, Source
+from damien.plan import (
+    apply_plan,
+    approve,
+    build_plan,
+    load_messages,
+    sample_plan,
+    undo_run,
+)
 from damien.rules import Condition, Rule
 from damien.store import Store
 
@@ -202,3 +209,42 @@ def test_build_plan_reports_what_came_from_cache(store: Store, gmail, fake):
                       limit=None, stats=stats)
     assert stats == {"messages": 3, "fetched": 0, "cached": 3}
     assert len(plan.items) == 3
+
+
+def test_applying_only_one_action_leaves_the_rest_of_the_plan(store: Store, gmail, fake):
+    plan = build(store, judge=FakeJudge())
+    assert plan.counts().get("trash") and plan.counts().get("label")
+    token = approve(store, plan.id)
+
+    run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, only=Action.trash)
+    assert run.status == "ok"
+    assert all("TRASH" in m["addLabelIds"] for m in fake.mods)       # nothing but trashing happened
+    assert store.get_plan(plan.id).status == "partly_applied"
+
+    sent = len(fake.mods)
+    apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
+    assert len(fake.mods) > sent                                     # the rest followed
+    assert store.get_plan(plan.id).status == "applied"
+
+
+def test_an_empty_slice_is_refused(store: Store, gmail):
+    rule = Rule(id="r-keep", name="keep all", action=Action.keep,
+                match=[Condition(field="any", op="exists")])
+    plan = build(store, rules=[rule], judge=None)
+    token = approve(store, plan.id)
+    with pytest.raises(ValueError, match="nothing to do"):
+        apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, only=Action.trash)
+
+
+def test_sampling_a_plan_that_mixes_labelled_and_unlabelled_items(store: Store):
+    """A plan has both `label`-with-a-name and `trash`-with-no-label; sorting those
+    keys together is a TypeError unless None is normalised."""
+    plan = store.create_plan("me@example.com", "q", [
+        PlanItem(message_id="m1", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m2", action=Action.label, label="Receipts", source=Source.jev),
+        PlanItem(message_id="m3", action=Action.keep, source=Source.jev),
+    ])
+    store.upsert_messages([Message(id=f"m{i}", account="me@example.com", subject=f"s{i}")
+                           for i in (1, 2, 3)])
+    rows = sample_plan(plan, store, n=10)
+    assert {r.action for r in rows} == {"trash", "label", "keep"}

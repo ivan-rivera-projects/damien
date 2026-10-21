@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import random
 import time
-from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx

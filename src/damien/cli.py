@@ -29,7 +29,7 @@ from .jev import FakeJudge, make_judge
 from .models import Action
 from .plan import apply_plan, approve, build_plan, load_messages, sample_plan, undo_run
 from .rules import default_rules, load_rules, save_rules
-from .store import open_store
+from .store import VerdictCache, open_store
 
 app = typer.Typer(add_completion=False, help="Damien — Gmail triage: rules first, a System One model for judgment, code for every write.")
 plan_app = typer.Typer(help="Build, review and apply a plan. Only `apply` writes.")
@@ -59,12 +59,12 @@ def _gmail(settings: Settings) -> Gmail:
     return Gmail(settings)
 
 
-def _judge(settings: Settings, mode: str):
+def _judge(settings: Settings, mode: str, cache=None):
     if mode == "none":
         return None
     if mode == "fake":
         return FakeJudge()
-    return make_judge(settings, DEFAULT_SPEC)
+    return make_judge(settings, DEFAULT_SPEC, cache=cache)
 
 
 @app.command()
@@ -146,9 +146,9 @@ def plan_build(
     settings = _load()
     gmail = _gmail(settings)
     rules = _rules(settings, rules_path)
-    judge = _judge(settings, judge_mode)
     stats: dict[str, int] = {}
     with open_store(settings) as store:
+        judge = _judge(settings, judge_mode, cache=VerdictCache(store))
         try:
             plan = build_plan(store=store, gmail=gmail, rules=rules, judge=judge, query=query, limit=limit,
                               ttl_hours=settings.header_ttl_hours, stats=stats,
@@ -161,11 +161,13 @@ def plan_build(
         rows = sample_plan(plan, store, n=show)
         spent = getattr(judge, "spent_usd", 0.0)
         calls = getattr(judge, "calls", 0)
+        cached_calls = getattr(judge, "cached", 0)
 
     if json_out:
         typer.echo(json.dumps({"plan": plan.id, "counts": counts,
                                "sample": [r.__dict__ for r in rows],
-                               "judge_calls": calls, "judge_usd": round(spent, 6)}, indent=2, default=str))
+                               "judge_calls": calls, "judge_cached": cached_calls,
+                               "judge_usd": round(spent, 6)}, indent=2, default=str))
         return
 
     typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))", bold=True)
@@ -173,8 +175,8 @@ def plan_build(
         typer.echo(f"  headers: {stats['cached']} from cache · {stats['fetched']} fetched from Gmail")
     for action, n in sorted(counts.items()):
         typer.echo(f"  {action:<10} {n}")
-    if calls:
-        typer.echo(f"  judgment: {calls} call(s), ${spent:.4f}")
+    if calls or cached_calls:
+        typer.echo(f"  judgment: {calls} call(s), {cached_calls} from cache, ${spent:.4f}")
     typer.echo()
     typer.secho("sample", bold=True)
     for row in rows:
@@ -226,20 +228,35 @@ def plan_apply(
     plan_id: str,
     token: str = typer.Option(..., "--token"),
     yes: bool = typer.Option(False, "--yes", help="Required: this writes to Gmail."),
+    only: str | None = typer.Option(None, "--only", help="Apply one action of the plan: trash|archive|label|mark_read."),
 ) -> None:
-    """Apply an approved plan, in bulk batches, journalling every one."""
+    """Apply an approved plan, in bulk batches, journalling every one.
+
+    `--only trash` applies exactly the slice you read — the rest of the plan stays
+    approved for a later pass.
+    """
     if not yes:
         typer.secho("refusing to write without --yes", fg="yellow")
         raise typer.Exit(2)
+    parsed_only: Action | None = None
+    if only is not None:
+        try:
+            parsed_only = Action(only)
+        except ValueError:
+            typer.secho(f"unknown action for --only: {only}", fg="red")
+            raise typer.Exit(2)
     settings = _load()
     gmail = _gmail(settings)
     with open_store(settings) as store:
         try:
-            run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token)
+            run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token, only=parsed_only)
         except (ValueError, GmailError) as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)
-    typer.secho(f"run {run.id} {run.status}: {run.applied} message(s) in {len(run.batches)} batch(es)", fg="green")
+    slice_note = f" ({parsed_only.value} slice)" if parsed_only else ""
+    typer.secho(f"run {run.id} {run.status}: {run.applied} message(s) in {len(run.batches)} batch(es){slice_note}", fg="green")
+    if parsed_only:
+        typer.secho("the rest of the plan is still approved", dim=True)
     typer.secho(f"to take it back: damien run undo {run.id}", dim=True)
 
 

@@ -23,6 +23,8 @@ Design decisions here are all traceable to the vendor documentation:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 import time
 from collections.abc import Callable, Sequence
@@ -134,7 +136,7 @@ class JevJudge:
 
     def __init__(self, settings: Settings, spec: JudgementSpec, *, concurrency: int = 8,
                  transport: httpx.BaseTransport | None = None, url: str | None = None,
-                 backend: str | None = None):
+                 backend: str | None = None, cache: Any = None):
         self.settings = settings
         self.spec = spec
         self.concurrency = max(1, min(concurrency, 8))     # the docs cap the public endpoint near eight
@@ -142,7 +144,9 @@ class JevJudge:
         self.url = url or (TYPESAFE_URL if self.name == "typesafe" else OPENROUTER_DECISIONS_URL)
         self._client = httpx.Client(timeout=60.0, transport=transport)
         self.calls = 0
+        self.cached = 0
         self.spent_usd = 0.0
+        self.cache = cache                     # anything with get(key) / put(key, id, model, verdict)
 
     # ---- transport ----------------------------------------------------
     def _headers(self) -> dict[str, str]:
@@ -185,20 +189,47 @@ class JevJudge:
             delay = min(delay * 2, 8.0)
         raise RuntimeError(f"gave up calling Jev for {message.id}: {last}")
 
+    def verdict_key(self, message: Message, context: str, label_names: dict[str, str] | None) -> str:
+        """The cache key is the request: if the state and the questions are identical,
+        the answer is identical, so it never needs buying twice. Changing the model,
+        a question's wording, or the person's own labels on the message all invalidate it."""
+        payload = "|".join([
+            self.settings.model,
+            json.dumps(build_questions(self.spec), sort_keys=True, default=str),
+            json.dumps(message_state(message, context, label_names), sort_keys=True, default=str),
+        ])
+        return hashlib.sha256(payload.encode()).hexdigest()
+
     # ---- the Judge interface -----------------------------------------
     def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
               label_names: dict[str, str] | None = None) -> list[Verdict]:
-        out: list[Verdict] = []
         self.label_names = label_names or {}
-        with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
-            futures = [pool.submit(self._post, m, context) for m in messages]
-            for message, future in zip(messages, futures):
-                try:
-                    out.append(future.result())
-                except Exception as exc:                  # one bad message never kills a plan
-                    out.append(Verdict(message_id=message.id, choice="unclear", confidence=0.0,
-                                       rationale=f"judgment failed: {str(exc)[:120]}"))
-        return out
+        keys = {m.id: self.verdict_key(m, context, label_names) for m in messages}
+        by_id: dict[str, Verdict] = {}
+        todo: list[Message] = []
+
+        for message in messages:
+            hit = self.cache.get(keys[message.id]) if self.cache else None
+            if hit:
+                self.cached += 1
+                by_id[message.id] = Verdict(**hit)
+            else:
+                todo.append(message)
+
+        if todo:
+            with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
+                futures = [pool.submit(self._post, m, context) for m in todo]
+                for message, future in zip(todo, futures):
+                    try:
+                        verdict = future.result()
+                    except Exception as exc:              # one bad message never kills a plan
+                        verdict = Verdict(message_id=message.id, choice="unclear", confidence=0.0,
+                                          rationale=f"judgment failed: {str(exc)[:120]}")
+                    by_id[message.id] = verdict
+                    if self.cache:
+                        self.cache.put(keys[message.id], message.id, self.settings.model,
+                                       verdict.model_dump(mode="json"))
+        return [by_id[m.id] for m in messages]            # original order, cache or not
 
 
 class FakeJudge:
@@ -209,6 +240,7 @@ class FakeJudge:
     def __init__(self, mapping: Callable[[Message], tuple[str, float]] | None = None):
         self.mapping = mapping or _heuristic
         self.calls = 0
+        self.cached = 0
         self.spent_usd = 0.0
 
     def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
@@ -238,10 +270,10 @@ def _heuristic(message: Message) -> tuple[str, float]:
     return "keep", 0.6
 
 
-def make_judge(settings: Settings, spec: JudgementSpec) -> JevJudge | FakeJudge | None:
+def make_judge(settings: Settings, spec: JudgementSpec, cache: Any = None) -> JevJudge | FakeJudge | None:
     """Pick a judge from settings. `rules` means no judge at all — rules only."""
     if settings.judge == "fake":
         return FakeJudge()
     if settings.judge in ("typesafe", "openrouter") and settings.api_key:
-        return JevJudge(settings, spec)
+        return JevJudge(settings, spec, cache=cache)
     return None

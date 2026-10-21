@@ -114,7 +114,7 @@ class Plan(BaseModel):
     account: str
     query: str
     created_at: datetime = Field(default_factory=now)
-    status: Literal["draft", "approved", "applied", "undone"] = "draft"
+    status: Literal["draft", "approved", "partly_applied", "applied", "undone"] = "draft"
     token: str | None = None
     items: list[PlanItem] = Field(default_factory=list)
 

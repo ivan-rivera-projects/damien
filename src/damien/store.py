@@ -31,7 +31,7 @@ from .models import (
     now,
 )
 
-TABLES = ("corrections", "run_batches", "runs", "plan_items", "plans", "decisions", "messages")
+TABLES = ("corrections", "verdicts", "run_batches", "runs", "plan_items", "plans", "decisions", "messages")
 
 SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -111,6 +111,18 @@ CREATE TABLE IF NOT EXISTS run_batches (
   inverse TEXT,
   at TEXT NOT NULL,
   PRIMARY KEY (run_id, idx)
+);
+
+CREATE TABLE IF NOT EXISTS verdicts (
+  cache_key TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  model TEXT,
+  choice TEXT NOT NULL,
+  confidence DOUBLE PRECISION,
+  probabilities TEXT,
+  signals TEXT,
+  rationale TEXT,
+  at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS corrections (
@@ -203,6 +215,18 @@ CREATE TABLE IF NOT EXISTS run_batches (
   inverse TEXT,
   at TEXT NOT NULL,
   PRIMARY KEY (run_id, idx)
+);
+
+CREATE TABLE IF NOT EXISTS verdicts (
+  cache_key TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  model TEXT,
+  choice TEXT NOT NULL,
+  confidence DOUBLE PRECISION,
+  probabilities TEXT,
+  signals TEXT,
+  rationale TEXT,
+  at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS corrections (
@@ -505,6 +529,33 @@ class Store:
         row = self.conn.execute("SELECT id FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT 1", (plan_id,)).fetchone()
         return self.get_run(row["id"]) if row else None
 
+    # ---- verdict cache (so an unchanged message is never judged twice) ---
+    def get_verdict(self, cache_key: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM verdicts WHERE cache_key = ?", (cache_key,)).fetchone()
+        if not row:
+            return None
+        return {
+            "message_id": row["message_id"], "choice": row["choice"], "confidence": row["confidence"],
+            "probabilities": json.loads(row["probabilities"]) if row["probabilities"] else None,
+            "signals": json.loads(row["signals"]) if row["signals"] else None,
+            "rationale": row["rationale"],
+        }
+
+    def put_verdict(self, cache_key: str, message_id: str, model: str | None, verdict: dict) -> None:
+        self.conn.execute(
+            """INSERT INTO verdicts (cache_key, message_id, model, choice, confidence, probabilities, signals, rationale, at)
+               VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(cache_key) DO UPDATE SET
+                 choice=EXCLUDED.choice, confidence=EXCLUDED.confidence, probabilities=EXCLUDED.probabilities,
+                 signals=EXCLUDED.signals, rationale=EXCLUDED.rationale, at=EXCLUDED.at""",
+            (cache_key, message_id, model, verdict.get("choice"), verdict.get("confidence"),
+             json.dumps(verdict.get("probabilities")) if verdict.get("probabilities") else None,
+             json.dumps(verdict.get("signals")) if verdict.get("signals") else None,
+             verdict.get("rationale"), _iso(now())))
+        self.conn.commit()
+
+    def verdict_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) AS n FROM verdicts").fetchone()["n"]
+
     # ---- corrections ---------------------------------------------------
     def correct(self, message_id: str, action: Action, label: str | None = None, note: str | None = None) -> None:
         self.conn.execute("INSERT INTO corrections (message_id, action, label, note, at) VALUES (?,?,?,?,?)",
@@ -524,6 +575,19 @@ class Store:
             "runs": q("SELECT COUNT(*) AS n FROM runs").fetchone()["n"],
             "corrections": q("SELECT COUNT(*) AS n FROM corrections").fetchone()["n"],
         }
+
+
+class VerdictCache:
+    """The store, narrowed to what a judge needs: remember an answer, look it up."""
+
+    def __init__(self, store: Store):
+        self.store = store
+
+    def get(self, cache_key: str) -> dict | None:
+        return self.store.get_verdict(cache_key)
+
+    def put(self, cache_key: str, message_id: str, model: str | None, verdict: dict) -> None:
+        self.store.put_verdict(cache_key, message_id, model, verdict)
 
 
 def open_store(settings: Any) -> Store:
