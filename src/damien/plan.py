@@ -16,7 +16,7 @@ from .decide import DEFAULT_SPEC, Judge, JudgementSpec, apply_corrections, decid
 from .embed import DEFAULT_SIMILARITY, cluster
 from .gmail import Gmail
 from .models import Action, Message, Plan, PlanItem, Run, RunBatch, Source
-from .rules import Rule
+from .rules import Rule, to_query
 from .stakes import DEFAULT_PROTECTED
 from .store import Store
 
@@ -147,6 +147,35 @@ def digest_plan(plan: Plan, store: Store, *, similarity: float = DEFAULT_SIMILAR
             ))
     groups.sort(key=lambda g: (g.action, -len(g.message_ids)))
     return groups
+
+
+def plan_from_rules(*, store: Store, gmail: Gmail, rules: Sequence[Rule], limit: int | None = None,
+                    sample: int = 10) -> Plan:
+    """A plan whose decisions Gmail itself can carry out — no headers, no model.
+
+    This is how a mailbox of a hundred thousand messages is handled at all: a rule
+    that translates to a Gmail query is evaluated *by Gmail*, so the only calls are
+    the listings and the bulk writes. Twenty messages are fetched afterwards, purely
+    so the plan can be read before it is applied.
+    """
+    items: dict[str, PlanItem] = {}
+    used: list[str] = []
+    for rule in rules:
+        query = to_query(rule)
+        if query is None or not rule.enabled:
+            continue
+        used.append(rule.id)
+        for mid in gmail.list_ids(query, limit=limit):
+            items.setdefault(mid, PlanItem(message_id=mid, action=rule.action, label=rule.label,
+                                           source=Source.rule, rule_id=rule.id))
+    plan = store.create_plan(
+        account=gmail.settings.account or "", query=f"rules: {', '.join(used) or 'none'}",
+        items=list(items.values()), judge="rules",
+    )
+    if sample and items:
+        ids = list(items)[:sample]
+        store.upsert_messages(gmail.fetch(ids))
+    return plan
 
 
 def group_by_index(plan: Plan, store: Store, index: int, *, similarity: float = DEFAULT_SIMILARITY,

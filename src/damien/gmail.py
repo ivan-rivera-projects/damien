@@ -54,6 +54,12 @@ class RateLimiter:
         self._updated = time.monotonic()
         self._lock = threading.Lock()
 
+    def slow_down(self, factor: float = 0.5) -> None:
+        """Gmail told us we are too fast: become slower from here on."""
+        with self._lock:
+            self.rate = max(0.5, self.rate * factor)
+            self.capacity = max(1.0, self.rate)
+
     def take(self) -> float:
         """Block until one request may go. Returns the seconds waited."""
         waited = 0.0
@@ -137,7 +143,7 @@ class Gmail:
 
     # ---- transport ----------------------------------------------------
     def _request(self, method: str, url: str, *, params: dict | None = None, json_body: dict | None = None,
-                 attempts: int = 6) -> dict:
+                 attempts: int = 10) -> dict:
         delay = 0.5
         last: Exception | None = None
         for attempt in range(attempts):
@@ -159,7 +165,8 @@ class Gmail:
                     # throttle is a real refusal and still raises.
                     if resp.status_code == 429 or _is_throttle(resp):
                         self.throttled += 1
-                        delay = max(delay, 2.0)
+                        self.limiter.slow_down()          # the ceiling is real: back off for the rest of the run
+                        delay = max(delay, 3.0)
                     last = GmailError(f"{resp.status_code}: {resp.text[:200]}")
                 elif resp.status_code >= 400:
                     raise GmailError(f"{method} {url} -> {resp.status_code}: {resp.text[:400]}")

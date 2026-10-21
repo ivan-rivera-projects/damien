@@ -405,6 +405,51 @@ def rules_init(force: bool = typer.Option(False, "--force")) -> None:
     typer.secho(f"wrote {path}", fg="green")
 
 
+@rules_app.command("plan")
+def rules_plan(
+    rule: list[str] = typer.Option(None, "--rule", "-r", help="Which rule(s). Omit for every translatable rule."),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Cap the matches per rule."),
+    sample: int = typer.Option(10, "--sample", help="Messages to fetch so the plan can be read."),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build a plan from rules Gmail can evaluate itself — no headers, no model.
+
+    For a mailbox of this size this is the only pass that finishes: a hundred
+    thousand messages cost a hundred listings and a few bulk writes.
+    """
+    settings = _load()
+    gmail = _gmail(settings)
+    rules = _rules(settings, None)
+    if rule:
+        wanted = set(rule)
+        rules = [r for r in rules if r.id in wanted or r.name in wanted]
+        if not rules:
+            typer.secho(f"no such rule: {', '.join(rule)}", fg="red")
+            raise typer.Exit(1)
+    with open_store(settings) as store:
+        try:
+            plan = plan_from_rules(store=store, gmail=gmail, rules=rules, limit=limit, sample=sample)
+        except GmailError as exc:
+            typer.secho(str(exc), fg="red")
+            raise typer.Exit(1)
+        counts = plan.counts()
+        rows = sample_plan(plan, store, n=max(sample, 1))
+
+    if json_out:
+        typer.echo(json.dumps({"plan": plan.id, "counts": counts,
+                               "sample": [r.__dict__ for r in rows]}, indent=2, default=str))
+        return
+    typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))  from {plan.query}", bold=True)
+    for action, n in sorted(counts.items()):
+        typer.echo(f"  {action:<10} {n:,}")
+    typer.echo()
+    for row in rows:
+        typer.echo(f"  {row.action:<9} {(row.label or ''):<10} {row.subject[:56]!r} <{row.from_addr}>")
+    typer.secho("\nnothing has changed in Gmail. review, then:", dim=True)
+    typer.echo(f"  damien plan approve {plan.id}")
+    typer.echo(f"  damien plan apply {plan.id} --token <t> --yes")
+
+
 @rules_app.command("from-group")
 def rules_from_group(
     plan_id: str,

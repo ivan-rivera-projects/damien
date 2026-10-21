@@ -25,6 +25,7 @@ class FakeGmailState:
         self.queries: list[str] = []                 # every q= that went out
         self.fail_mods = 0                          # fail the next N batchModify calls
         self.fail_status = 400
+        self.result_estimate = 0
         self._next_label = 2
 
     def add(self, mid: str, *, subject: str = "Hello", sender: str = "Alex <alex@example.com>",
@@ -67,6 +68,9 @@ class FakeGmailState:
             self.queries.append(raw_q)
             needle = raw_q.split()[0].split(":")[-1].strip().lower()   # 'in:inbox -in:spam' -> 'inbox'
             ids = [mid for mid, m in self.messages.items() if not needle or needle in json.dumps(m).lower()]
+            if int(request.url.params.get("maxResults", "100")) == 1 and self.result_estimate:
+                return httpx.Response(200, json={"messages": [{"id": next(iter(self.messages), "x")}],
+                                                 "resultSizeEstimate": self.result_estimate})
             start = int(request.url.params.get("pageToken") or "0")
             max_results = int(request.url.params.get("maxResults", "100"))
             page = ids[start:start + max_results]

@@ -120,7 +120,8 @@ def test_a_403_quota_error_is_retried_not_fatal(settings):
 
     g = Gmail(settings, http=httpx.Client(transport=httpx.MockTransport(handler)))
     g._creds = FakeCreds()
-    g.limiter = type("L", (), {"take": lambda self: 0.0})()          # no pacing in the test
+    from damien.gmail import RateLimiter
+    g.limiter = RateLimiter(rate_per_second=10_000)                   # no pacing in the test
     assert g.profile()["emailAddress"] == "me@example.com"
     assert calls["n"] == 3 and g.throttled == 2
 
@@ -135,7 +136,8 @@ def test_a_403_that_is_not_a_throttle_still_raises(settings):
 
     g = Gmail(settings, http=httpx.Client(transport=httpx.MockTransport(handler)))
     g._creds = FakeCreds()
-    g.limiter = type("L", (), {"take": lambda self: 0.0})()
+    from damien.gmail import RateLimiter
+    g.limiter = RateLimiter(rate_per_second=10_000)
     with pytest.raises(Exception, match="Insufficient Permission"):
         g.profile()
 
@@ -158,3 +160,25 @@ def test_the_rate_limiter_paces(settings):
     for _ in range(10):
         limiter.take()
     assert __import__("time").monotonic() - t0 < 1.0        # a burst inside the bucket is free
+
+
+def test_a_throttle_slows_the_client_down_for_the_rest_of_the_run(settings):
+    import httpx
+    from conftest import FakeCreds
+
+    from damien.gmail import Gmail
+
+    state = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        state["n"] += 1
+        if state["n"] == 1:
+            return httpx.Response(403, headers={"Retry-After": "1"}, text="Quota exceeded for quota metric")
+        return httpx.Response(200, json={"emailAddress": "me@example.com"})
+
+    g = Gmail(settings, http=httpx.Client(transport=httpx.MockTransport(handler)))
+    g._creds = FakeCreds()
+    before = g.limiter.rate
+    assert g.profile()["emailAddress"] == "me@example.com"
+    assert g.limiter.rate == before / 2               # it learned
+    assert g.throttled == 1

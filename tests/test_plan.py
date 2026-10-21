@@ -14,6 +14,7 @@ from damien.plan import (
     digest_plan,
     group_by_index,
     load_messages,
+    plan_from_rules,
     sample_plan,
     undo_run,
 )
@@ -361,3 +362,33 @@ def test_a_person_decision_always_passes_the_confidence_floor(store: Store, gmai
     token = approve(store, plan.id)
     run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, min_confidence=0.9)
     assert run.applied == 1 and fake.mods[0]["ids"] == ["m1"]
+
+
+# ---- a rule pass: no headers, no model ---------------------------------------
+def test_plan_from_rules_lists_and_does_not_fetch_everything(store: Store, gmail, fake):
+    for i in range(6):
+        fake.add(f"m{i}", subject=f"message {i}", labels=["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"])
+    fake.add("keep1", subject="a real letter", labels=["INBOX", "UNREAD"])
+    rules = [
+        Rule(id="r-promos", name="old promos", action=Action.trash,
+             match=[Condition(field="label", op="contains", value="CATEGORY_PROMOTIONS")]),
+        Rule(id="r-regex", name="cannot be translated", action=Action.archive,
+             match=[Condition(field="subject", op="regex", value="^message")]),
+    ]
+    plan = plan_from_rules(store=store, gmail=gmail, rules=rules, sample=2)
+    assert plan.counts() == {"trash": 6}                       # only the translatable rule ran
+    assert {i.rule_id for i in plan.items} == {"r-promos"}
+    assert gmail.fetched == 2                                  # only the sample was fetched
+    assert "r-promos" in plan.query and "r-regex" not in plan.query
+
+
+def test_a_message_matching_two_rules_takes_the_first(store: Store, gmail, fake):
+    fake.add("m1", subject="promo", labels=["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"])
+    rules = [
+        Rule(id="r-first", name="first", action=Action.label, label="Promos",
+             match=[Condition(field="label", op="contains", value="CATEGORY_PROMOTIONS")]),
+        Rule(id="r-second", name="second", action=Action.trash,
+             match=[Condition(field="label", op="contains", value="CATEGORY_PROMOTIONS")]),
+    ]
+    plan = plan_from_rules(store=store, gmail=gmail, rules=rules, sample=0)
+    assert len(plan.items) == 1 and plan.items[0].rule_id == "r-first"
