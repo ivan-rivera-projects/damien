@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -95,7 +96,7 @@ class FakeCreds:
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
-        root=tmp_path, db_path=tmp_path / "damien.db", credentials_path=tmp_path / "credentials.json",
+        root=tmp_path, db_path=tmp_path / "damien.db", db_url=None, credentials_path=tmp_path / "credentials.json",
         token_path=tmp_path / "token.json", account="me@example.com", scopes=("x",), judge="fake",
         model="jev-latest", api_key=None, page_size=2, op_batch=2, judge_batch=2,
         confidence_act=0.8, confidence_ask=0.55,
@@ -115,8 +116,22 @@ def gmail(settings: Settings, fake: FakeGmailState) -> Gmail:
     return g
 
 
-@pytest.fixture
-def store(settings: Settings) -> Store:
-    s = Store(settings.db_path)
+@pytest.fixture(params=["sqlite", "postgres"])
+def store(request, settings: Settings):
+    """Every store test runs against both dialects, so they cannot drift.
+
+    Postgres runs only when DAMIEN_TEST_DB_URL names a scratch database.
+    """
+    if request.param == "sqlite":
+        s = Store(settings.db_path)
+        yield s
+        s.close()
+        return
+    url = os.environ.get("DAMIEN_TEST_DB_URL")
+    if not url:
+        pytest.skip("DAMIEN_TEST_DB_URL is not set — Postgres half of the matrix skipped")
+    s = Store(url)
+    s.reset()
     yield s
+    s.reset()
     s.close()

@@ -76,3 +76,10 @@ def test_summary_counts_everything(store: Store):
     assert store.summary()["messages"] == 1
     assert store.summary()["decisions"] == 1
     assert store.summary()["plans"] == 1
+
+
+def test_a_connection_string_never_prints_its_password():
+    from damien.config import _mask_url
+    assert _mask_url("postgres://user:s3cr3t@127.0.0.1:5433/damien") == "postgres://user:***@127.0.0.1:5433/damien"
+    assert _mask_url("postgres://user@host/db") == "postgres://user@host/db"
+    assert _mask_url(None) is None

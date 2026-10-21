@@ -29,7 +29,7 @@ from .jev import FakeJudge, make_judge
 from .models import Action
 from .plan import apply_plan, approve, build_plan, sample_plan, undo_run
 from .rules import default_rules, load_rules, save_rules
-from .store import Store
+from .store import open_store
 
 app = typer.Typer(add_completion=False, help="Damien — Gmail triage: rules first, a System One model for judgment, code for every write.")
 plan_app = typer.Typer(help="Build, review and apply a plan. Only `apply` writes.")
@@ -91,7 +91,7 @@ def login() -> None:
 def status(json_out: bool = typer.Option(False, "--json", help="Machine-readable output.")) -> None:
     """What is configured, what has been decided, what has been done."""
     settings = _load()
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         info = {
             "config": settings.redacted(),
             "store": store.summary(),
@@ -117,7 +117,7 @@ def scan(
     """List and cache headers for a query. Reads only; decides nothing."""
     settings = _load()
     gmail = _gmail(settings)
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         try:
             ids = gmail.list_ids(query, limit=limit)
             messages = gmail.fetch(ids) if ids else []
@@ -146,7 +146,7 @@ def plan_build(
     gmail = _gmail(settings)
     rules = _rules(settings, rules_path)
     judge = _judge(settings, judge_mode)
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         try:
             plan = build_plan(store=store, gmail=gmail, rules=rules, judge=judge, query=query, limit=limit,
                               judge_batch=settings.judge_batch, ask_below=settings.confidence_ask,
@@ -184,7 +184,7 @@ def plan_build(
 def plan_show(plan_id: str, sample: int = typer.Option(20, "--sample"), json_out: bool = typer.Option(False, "--json")) -> None:
     """Read one plan — counts and a stratified sample."""
     settings = _load()
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         plan = store.get_plan(plan_id)
         if plan is None:
             typer.secho(f"no such plan: {plan_id}", fg="red")
@@ -206,7 +206,7 @@ def plan_show(plan_id: str, sample: int = typer.Option(20, "--sample"), json_out
 def plan_approve(plan_id: str) -> None:
     """Mint the approval token for a plan. Prints it once."""
     settings = _load()
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         try:
             token = approve(store, plan_id)
         except ValueError as exc:
@@ -228,7 +228,7 @@ def plan_apply(
         raise typer.Exit(2)
     settings = _load()
     gmail = _gmail(settings)
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         try:
             run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token)
         except (ValueError, GmailError) as exc:
@@ -243,7 +243,7 @@ def run_list(json_out: bool = typer.Option(False, "--json")) -> None:
     """Plans and their runs."""
     settings = _load()
     rows: list[dict] = []
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         for p in store.list_plans(20):
             run = store.last_run_for_plan(p["id"])
             rows.append({"plan": p["id"], "status": p["status"], "query": p["query"],
@@ -263,7 +263,7 @@ def run_undo(run_id: str, yes: bool = typer.Option(False, "--yes")) -> None:
         raise typer.Exit(2)
     settings = _load()
     gmail = _gmail(settings)
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         try:
             run = undo_run(store=store, gmail=gmail, run_id=run_id)
         except (ValueError, GmailError) as exc:
@@ -314,7 +314,7 @@ def correct(
     except ValueError:
         typer.secho(f"unknown action: {action}", fg="red")
         raise typer.Exit(1)
-    with Store(settings.db_path) as store:
+    with open_store(settings) as store:
         store.correct(message_id, parsed, label=label, note=note)
     typer.secho(f"recorded correction for {message_id}: {parsed.value}", fg="green")
 

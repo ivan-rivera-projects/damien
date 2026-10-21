@@ -7,6 +7,7 @@ No service URLs, no ports: this is a library and a CLI, not a platform.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,10 +33,18 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
+def _mask_url(value: str | None) -> str | None:
+    """postgres://user:secret@host/db -> postgres://user:***@host/db. Never print a credential."""
+    if not value:
+        return value
+    return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:***@", value)
+
+
 @dataclass(frozen=True)
 class Settings:
     root: Path
     db_path: Path
+    db_url: str | None           # postgres://… wins over db_path when set
     credentials_path: Path
     token_path: Path
     account: str
@@ -52,6 +61,8 @@ class Settings:
     def redacted(self) -> dict[str, object]:
         d = dict(self.__dict__)
         d.pop("api_key", None)
+        if "db_url" in d:
+            d["db_url"] = _mask_url(self.db_url)          # a connection string carries a password
         return {k: (str(v) if isinstance(v, Path) else v) for k, v in d.items()}
 
 
@@ -81,6 +92,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
     return Settings(
         root=root,
         db_path=Path(env("DAMIEN_DB") or (root / "damien.db")),
+        db_url=env("DAMIEN_DB_URL") or None,
         credentials_path=Path(env("DAMIEN_CREDENTIALS") or (root / "credentials.json")),
         token_path=Path(env("DAMIEN_TOKEN") or (root / "token.json")),
         account=env("DAMIEN_ACCOUNT"),

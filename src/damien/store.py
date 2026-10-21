@@ -1,8 +1,12 @@
-"""The store: one SQLite file that remembers everything.
+"""The store: one place that remembers everything — on SQLite or on Postgres.
 
-It exists because the old Damien kept jobs in two in-memory dicts and rules in a
-JSON file, so a restart lost a run in flight and nothing was auditable. Every
-decision, every batch applied, and every correction a person makes lives here.
+Why both: a bare checkout has to work with zero infrastructure (SQLite, one file),
+and Damien should also be able to live in the Postgres you already run, next to
+everything else, where pgvector and real backups are. The same tests run against
+both, so the two never drift.
+
+`Store(path)` for a file, `Store("postgres://…")` for a server. The SQL is written
+once with `?` placeholders and translated for Postgres.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 from .models import (
     Action,
@@ -27,7 +31,9 @@ from .models import (
     now,
 )
 
-SCHEMA = """
+TABLES = ("corrections", "run_batches", "runs", "plan_items", "plans", "decisions", "messages")
+
+SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   account TEXT NOT NULL,
@@ -116,28 +122,189 @@ CREATE TABLE IF NOT EXISTS corrections (
 );
 """
 
+# Same shape, Postgres types. JSON is kept as text in both so the two dialects
+# cannot drift in behaviour; these tables are read by this program, not by analysts.
+SCHEMA_PG = """
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  thread_id TEXT,
+  internal_date BIGINT,
+  from_addr TEXT,
+  from_name TEXT,
+  to_addr TEXT,
+  subject TEXT,
+  snippet TEXT,
+  label_ids TEXT NOT NULL DEFAULT '[]',
+  has_attachment INTEGER NOT NULL DEFAULT 0,
+  list_unsubscribe INTEGER NOT NULL DEFAULT 0,
+  size_estimate INTEGER,
+  seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS messages_account_date ON messages(account, internal_date);
+
+CREATE TABLE IF NOT EXISTS decisions (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  account TEXT NOT NULL,
+  source TEXT NOT NULL,
+  action TEXT NOT NULL,
+  label TEXT,
+  rule_id TEXT,
+  rationale TEXT,
+  confidence DOUBLE PRECISION,
+  probabilities TEXT,
+  model TEXT,
+  at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS decisions_message ON decisions(message_id);
+
+CREATE TABLE IF NOT EXISTS plans (
+  id TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  query TEXT NOT NULL,
+  status TEXT NOT NULL,
+  token TEXT,
+  created_at TEXT NOT NULL,
+  model TEXT,
+  judge TEXT
+);
+
+CREATE TABLE IF NOT EXISTS plan_items (
+  plan_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  label TEXT,
+  source TEXT NOT NULL,
+  rule_id TEXT,
+  confidence DOUBLE PRECISION,
+  PRIMARY KEY (plan_id, message_id)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL,
+  account TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  applied INTEGER NOT NULL DEFAULT 0,
+  error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS run_batches (
+  run_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  op TEXT NOT NULL,
+  label TEXT,
+  ids TEXT NOT NULL,
+  inverse TEXT,
+  at TEXT NOT NULL,
+  PRIMARY KEY (run_id, idx)
+);
+
+CREATE TABLE IF NOT EXISTS corrections (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  label TEXT,
+  note TEXT,
+  at TEXT NOT NULL
+);
+"""
+
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat()
 
 
-class Store:
-    def __init__(self, path: Path | str):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(self.path))
-        self.db.row_factory = sqlite3.Row
-        self.db.executescript(SCHEMA)
-        self.db.commit()
+def is_url(target: str | Path) -> bool:
+    return str(target).startswith(("postgres://", "postgresql://"))
+
+
+class _SqliteConn:
+    """The sqlite3 surface, narrowed to what Store uses."""
+
+    dialect = "sqlite"
+
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.raw = sqlite3.connect(str(path))
+        self.raw.row_factory = sqlite3.Row
+
+    def execute(self, sql: str, params: Sequence[Any] | None = None):
+        return self.raw.execute(sql, tuple(params or ()))
+
+    def executemany(self, sql: str, rows: Sequence[Sequence[Any]]) -> None:
+        self.raw.executemany(sql, [tuple(r) for r in rows])
+
+    def script(self, ddl: str) -> None:
+        self.raw.executescript(ddl)
+
+    def commit(self) -> None:
+        self.raw.commit()
 
     def close(self) -> None:
-        self.db.close()
+        self.raw.close()
+
+
+class _PgConn:
+    """The same surface over psycopg. `?` placeholders are translated once."""
+
+    dialect = "postgres"
+
+    def __init__(self, url: str):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        self.raw = psycopg.connect(url, row_factory=dict_row)
+
+    @staticmethod
+    def _q(sql: str) -> str:
+        return sql.replace("?", "%s")
+
+    def execute(self, sql: str, params: Sequence[Any] | None = None):
+        return self.raw.execute(self._q(sql), tuple(params or ()))
+
+    def executemany(self, sql: str, rows: Sequence[Sequence[Any]]) -> None:
+        with self.raw.cursor() as cur:
+            cur.executemany(self._q(sql), [tuple(r) for r in rows])
+
+    def script(self, ddl: str) -> None:
+        with self.raw.cursor() as cur:
+            cur.execute(ddl)                       # psycopg sends a multi-statement string in one round trip
+
+    def commit(self) -> None:
+        self.raw.commit()
+
+    def close(self) -> None:
+        self.raw.close()
+
+
+class Store:
+    """Everything a run needs to be auditable, resumable and reversible."""
+
+    def __init__(self, target: Path | str):
+        self.target = str(target)
+        self.conn: _SqliteConn | _PgConn = _PgConn(self.target) if is_url(target) else _SqliteConn(Path(target))
+        self.dialect = self.conn.dialect
+        self.conn.script(SCHEMA_PG if self.dialect == "postgres" else SCHEMA_SQLITE)
+        self.conn.commit()
+
+    def close(self) -> None:
+        self.conn.close()
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    def reset(self) -> None:
+        """Empty every table. For tests and for starting over on purpose."""
+        for table in TABLES:
+            self.conn.execute(f"DELETE FROM {table}")
+        self.conn.commit()
 
     # ---- messages -----------------------------------------------------
     def upsert_messages(self, messages: Iterable[Message], seen_at: datetime | None = None) -> int:
@@ -150,33 +317,33 @@ class Store:
             )
             for m in messages
         ]
-        self.db.executemany(
+        self.conn.executemany(
             """INSERT INTO messages (id, account, thread_id, internal_date, from_addr, from_name, to_addr,
                                      subject, snippet, label_ids, has_attachment, list_unsubscribe, size_estimate, seen_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
-                 thread_id=excluded.thread_id, internal_date=excluded.internal_date, from_addr=excluded.from_addr,
-                 from_name=excluded.from_name, to_addr=excluded.to_addr, subject=excluded.subject,
-                 snippet=excluded.snippet, label_ids=excluded.label_ids, has_attachment=excluded.has_attachment,
-                 list_unsubscribe=excluded.list_unsubscribe, size_estimate=excluded.size_estimate,
-                 seen_at=excluded.seen_at""",
+                 thread_id=EXCLUDED.thread_id, internal_date=EXCLUDED.internal_date, from_addr=EXCLUDED.from_addr,
+                 from_name=EXCLUDED.from_name, to_addr=EXCLUDED.to_addr, subject=EXCLUDED.subject,
+                 snippet=EXCLUDED.snippet, label_ids=EXCLUDED.label_ids, has_attachment=EXCLUDED.has_attachment,
+                 list_unsubscribe=EXCLUDED.list_unsubscribe, size_estimate=EXCLUDED.size_estimate,
+                 seen_at=EXCLUDED.seen_at""",
             rows,
         )
-        self.db.commit()
+        self.conn.commit()
         return len(rows)
 
     def get_messages(self, ids: Sequence[str]) -> list[Message]:
         out: list[Message] = []
         for chunk in _chunks(list(ids), 900):
             q = f"SELECT * FROM messages WHERE id IN ({','.join('?' * len(chunk))})"
-            for row in self.db.execute(q, chunk):
+            for row in self.conn.execute(q, chunk):
                 out.append(_message(row))
         return out
 
     def count_messages(self, account: str | None = None) -> int:
         if account:
-            return self.db.execute("SELECT COUNT(*) FROM messages WHERE account=?", (account,)).fetchone()[0]
-        return self.db.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            return self.conn.execute("SELECT COUNT(*) AS n FROM messages WHERE account=?", (account,)).fetchone()["n"]
+        return self.conn.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]
 
     # ---- decisions ----------------------------------------------------
     def add_decisions(self, decisions: Iterable[Decision], account: str = "") -> int:
@@ -185,20 +352,20 @@ class Store:
              d.confidence, json.dumps(d.probabilities) if d.probabilities else None, d.model, _iso(d.at))
             for d in decisions
         ]
-        self.db.executemany(
+        self.conn.executemany(
             """INSERT INTO decisions (message_id, account, source, action, label, rule_id, rationale,
                                       confidence, probabilities, model, at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             rows,
         )
-        self.db.commit()
+        self.conn.commit()
         return len(rows)
 
     def decisions_for(self, ids: Sequence[str]) -> list[Decision]:
         out: list[Decision] = []
         for chunk in _chunks(list(ids), 900):
             q = f"SELECT * FROM decisions WHERE message_id IN ({','.join('?' * len(chunk))}) ORDER BY id"
-            for row in self.db.execute(q, chunk):
+            for row in self.conn.execute(q, chunk):
                 out.append(Decision(
                     message_id=row["message_id"], action=Action(row["action"]), label=row["label"],
                     source=Source(row["source"]), rule_id=row["rule_id"], rationale=row["rationale"],
@@ -209,90 +376,90 @@ class Store:
         return out
 
     def decision_count(self) -> int:
-        return self.db.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        return self.conn.execute("SELECT COUNT(*) AS n FROM decisions").fetchone()["n"]
 
     # ---- plans --------------------------------------------------------
     def create_plan(self, account: str, query: str, items: Sequence[PlanItem], *, model: str | None = None,
                     judge: str | None = None) -> Plan:
         plan = Plan(id=uuid.uuid4().hex[:12], account=account, query=query, items=list(items))
-        self.db.execute(
+        self.conn.execute(
             "INSERT INTO plans (id, account, query, status, token, created_at, model, judge) VALUES (?,?,?,?,?,?,?,?)",
             (plan.id, account, query, plan.status, plan.token, _iso(plan.created_at), model, judge),
         )
-        self.db.executemany(
+        self.conn.executemany(
             """INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence)
                VALUES (?,?,?,?,?,?,?)""",
             [(plan.id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence) for i in plan.items],
         )
-        self.db.commit()
+        self.conn.commit()
         return plan
 
     def get_plan(self, plan_id: str) -> Plan | None:
-        row = self.db.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
+        row = self.conn.execute("SELECT * FROM plans WHERE id=?", (plan_id,)).fetchone()
         if not row:
             return None
         items = [
             PlanItem(message_id=r["message_id"], action=Action(r["action"]), label=r["label"],
                      source=Source(r["source"]), rule_id=r["rule_id"], confidence=r["confidence"])
-            for r in self.db.execute("SELECT * FROM plan_items WHERE plan_id=? ORDER BY message_id", (plan_id,))
+            for r in self.conn.execute("SELECT * FROM plan_items WHERE plan_id=? ORDER BY message_id", (plan_id,))
         ]
         return Plan(id=row["id"], account=row["account"], query=row["query"], status=row["status"],
                     token=row["token"], created_at=datetime.fromisoformat(row["created_at"]), items=items)
 
-    def list_plans(self, limit: int = 20) -> list[sqlite3.Row]:
-        return list(self.db.execute("SELECT * FROM plans ORDER BY created_at DESC LIMIT ?", (limit,)))
+    def list_plans(self, limit: int = 20) -> list[Any]:
+        return list(self.conn.execute("SELECT * FROM plans ORDER BY created_at DESC LIMIT ?", (limit,)))
 
     def approve_plan(self, plan_id: str) -> str:
         token = uuid.uuid4().hex[:16]
-        self.db.execute("UPDATE plans SET status='approved', token=? WHERE id=?", (token, plan_id))
-        self.db.commit()
+        self.conn.execute("UPDATE plans SET status='approved', token=? WHERE id=?", (token, plan_id))
+        self.conn.commit()
         return token
 
     def set_plan_status(self, plan_id: str, status: str) -> None:
-        self.db.execute("UPDATE plans SET status=? WHERE id=?", (status, plan_id))
-        self.db.commit()
+        self.conn.execute("UPDATE plans SET status=? WHERE id=?", (status, plan_id))
+        self.conn.commit()
 
     def update_plan_items(self, plan_id: str, items: Sequence[PlanItem]) -> None:
-        self.db.execute("DELETE FROM plan_items WHERE plan_id=?", (plan_id,))
-        self.db.executemany(
+        self.conn.execute("DELETE FROM plan_items WHERE plan_id=?", (plan_id,))
+        self.conn.executemany(
             "INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence) VALUES (?,?,?,?,?,?,?)",
             [(plan_id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence) for i in items],
         )
-        self.db.commit()
+        self.conn.commit()
 
     # ---- runs (the journal) -------------------------------------------
     def start_run(self, plan: Plan) -> Run:
         run = Run(id=uuid.uuid4().hex[:12], plan_id=plan.id, account=plan.account)
-        self.db.execute(
+        self.conn.execute(
             "INSERT INTO runs (id, plan_id, account, status, started_at, applied) VALUES (?,?,?,?,?,0)",
             (run.id, run.plan_id, run.account, run.status, _iso(run.started_at)),
         )
-        self.db.commit()
+        self.conn.commit()
         return run
 
     def journal_batch(self, run_id: str, batch: RunBatch) -> None:
-        self.db.execute(
+        self.conn.execute(
             "INSERT INTO run_batches (run_id, idx, op, label, ids, inverse, at) VALUES (?,?,?,?,?,?,?)",
             (run_id, batch.index, batch.op, batch.label, json.dumps(batch.ids),
              json.dumps(batch.inverse) if batch.inverse else None, _iso(batch.at)),
         )
-        self.db.execute("UPDATE runs SET applied = applied + ? WHERE id=?", (len(batch.ids), run_id))
-        self.db.commit()
+        self.conn.execute("UPDATE runs SET applied = applied + ? WHERE id=?", (len(batch.ids), run_id))
+        self.conn.commit()
 
     def finish_run(self, run_id: str, status: str, error: str | None = None) -> None:
-        self.db.execute("UPDATE runs SET status=?, finished_at=?, error=? WHERE id=?",
-                        (status, _iso(now()), error, run_id))
-        self.db.commit()
+        self.conn.execute("UPDATE runs SET status=?, finished_at=?, error=? WHERE id=?",
+                          (status, _iso(now()), error, run_id))
+        self.conn.commit()
 
     def get_run(self, run_id: str) -> Run | None:
-        row = self.db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        row = self.conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         if not row:
             return None
         batches = [
             RunBatch(index=r["idx"], op=r["op"], ids=json.loads(r["ids"]), label=r["label"],
                      inverse=json.loads(r["inverse"]) if r["inverse"] else None,
                      at=datetime.fromisoformat(r["at"]))
-            for r in self.db.execute("SELECT * FROM run_batches WHERE run_id=? ORDER BY idx", (run_id,))
+            for r in self.conn.execute("SELECT * FROM run_batches WHERE run_id=? ORDER BY idx", (run_id,))
         ]
         return Run(id=row["id"], plan_id=row["plan_id"], account=row["account"], status=row["status"],
                    started_at=datetime.fromisoformat(row["started_at"]),
@@ -300,28 +467,34 @@ class Store:
                    batches=batches, applied=row["applied"], error=row["error"])
 
     def last_run_for_plan(self, plan_id: str) -> Run | None:
-        row = self.db.execute("SELECT id FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT 1", (plan_id,)).fetchone()
+        row = self.conn.execute("SELECT id FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT 1", (plan_id,)).fetchone()
         return self.get_run(row["id"]) if row else None
 
     # ---- corrections ---------------------------------------------------
     def correct(self, message_id: str, action: Action, label: str | None = None, note: str | None = None) -> None:
-        self.db.execute("INSERT INTO corrections (message_id, action, label, note, at) VALUES (?,?,?,?,?)",
-                        (message_id, action.value, label, note, _iso(now())))
-        self.db.commit()
+        self.conn.execute("INSERT INTO corrections (message_id, action, label, note, at) VALUES (?,?,?,?,?)",
+                          (message_id, action.value, label, note, _iso(now())))
+        self.conn.commit()
 
-    def corrections(self, limit: int = 200) -> list[sqlite3.Row]:
-        return list(self.db.execute("SELECT * FROM corrections ORDER BY at DESC LIMIT ?", (limit,)))
+    def corrections(self, limit: int = 200) -> list[Any]:
+        return list(self.conn.execute("SELECT * FROM corrections ORDER BY at DESC LIMIT ?", (limit,)))
 
     # ---- reporting -----------------------------------------------------
     def summary(self) -> dict[str, int]:
-        q = self.db.execute
+        q = self.conn.execute
         return {
-            "messages": q("SELECT COUNT(*) FROM messages").fetchone()[0],
-            "decisions": q("SELECT COUNT(*) FROM decisions").fetchone()[0],
-            "plans": q("SELECT COUNT(*) FROM plans").fetchone()[0],
-            "runs": q("SELECT COUNT(*) FROM runs").fetchone()[0],
-            "corrections": q("SELECT COUNT(*) FROM corrections").fetchone()[0],
+            "messages": q("SELECT COUNT(*) AS n FROM messages").fetchone()["n"],
+            "decisions": q("SELECT COUNT(*) AS n FROM decisions").fetchone()["n"],
+            "plans": q("SELECT COUNT(*) AS n FROM plans").fetchone()["n"],
+            "runs": q("SELECT COUNT(*) AS n FROM runs").fetchone()["n"],
+            "corrections": q("SELECT COUNT(*) AS n FROM corrections").fetchone()["n"],
         }
+
+
+def open_store(settings: Any) -> Store:
+    """The one place that decides where state lives: a Postgres URL if given, else the file."""
+    url = getattr(settings, "db_url", None)
+    return Store(url) if url else Store(settings.db_path)
 
 
 def _chunks(items: list, size: int):
@@ -329,7 +502,7 @@ def _chunks(items: list, size: int):
         yield items[i:i + size]
 
 
-def _message(row: sqlite3.Row) -> Message:
+def _message(row: Any) -> Message:
     return Message(
         id=row["id"], account=row["account"], thread_id=row["thread_id"], internal_date=row["internal_date"],
         from_addr=row["from_addr"], from_name=row["from_name"], to=row["to_addr"], subject=row["subject"],

@@ -12,7 +12,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+pg = ["psycopg[binary]>=3.1"]
+dev = ["pytest>=8", "psycopg[binary]>=3.1"]
 
 [project.scripts]
 damien = "damien.cli:main"

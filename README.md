@@ -50,6 +50,30 @@ scan ──► rules ──► (residue) ──► Jev ──► confidence gate
    *before* it reaches Gmail. A run that dies halfway is resumable; `run undo` replays the
    inverse ops backwards.
 
+## Where state lives
+
+The same tests run against **both** backends, so the two cannot drift:
+
+| | SQLite (default) | Postgres |
+|---|---|---|
+| setup | none — one file at `~/.damien/damien.db` | `DAMIEN_DB_URL=postgres://…` |
+| concurrency | one writer at a time | real |
+| vectors | not here | **pgvector is already installed** — embeddings land next to the decisions |
+| ops | none | the server you already run, already backed up |
+
+Set `DAMIEN_DB_URL` and Damien uses Postgres; leave it unset and it uses the file.
+The two `damien` databases on the local server (created for this):
+
+```bash
+psql -h 127.0.0.1 -p 5433 -U conspire_app -d postgres -c 'CREATE DATABASE damien'      # live state
+psql -h 127.0.0.1 -p 5433 -U conspire_app -d postgres -c 'CREATE DATABASE damien_test' # the test matrix
+# reverse it: DROP DATABASE damien; DROP DATABASE damien_test;
+export DAMIEN_DB_URL="postgres://conspire_app:<password>@127.0.0.1:5433/damien"
+DAMIEN_TEST_DB_URL="postgres://conspire_app:<password>@127.0.0.1:5433/damien_test" pytest
+```
+
+`damien status` prints that URL with its password masked.
+
 ## Install
 
 ```bash
