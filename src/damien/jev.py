@@ -211,8 +211,11 @@ class JevJudge:
         for message in messages:
             hit = self.cache.get(keys[message.id]) if self.cache else None
             if hit:
+                # The key is the *state*, and two messages can share one exactly (same
+                # sender, subject, snippet, labels). The cached verdict therefore carries
+                # whichever message_id was stored first: answer for this one, not that one.
                 self.cached += 1
-                by_id[message.id] = Verdict(**hit)
+                by_id[message.id] = Verdict(**{**hit, "message_id": message.id})
             else:
                 todo.append(message)
 

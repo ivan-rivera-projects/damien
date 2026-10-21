@@ -206,9 +206,12 @@ def decide_all(
     criteria = spec.criteria()
     for chunk in _chunks(residue, max(1, batch_size)):
         verdicts = judge.judge(chunk, criteria, context=spec.context, label_names=label_names)
-        by_id = {v.message_id: v for v in verdicts}
+        # A judge answers one message per message, in order. Re-keying by the verdict's
+        # own message_id looked safer and was not: it silently dropped 2,180 decisions
+        # to "no judgment was made" whenever two messages shared a cache key.
+        by_position = dict(zip((m.id for m in chunk), verdicts))
         for message in chunk:
-            decisions.append(decide_message(message, rules=(), verdict=by_id.get(message.id), spec=spec,
+            decisions.append(decide_message(message, rules=(), verdict=by_position.get(message.id), spec=spec,
                                             label_names=label_names, model=model, protected_labels=protected_labels))
     return enforce_confidence(decisions, ask_below=ask_below)
 

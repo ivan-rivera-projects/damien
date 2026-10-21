@@ -257,3 +257,40 @@ def test_the_spec_names_the_persons_world_and_policy():
     assert "brand he follows" in promo.description.lower()       # a brand he follows is never a promo
     newsletter = next(b for b in spec.buckets if b.key == "newsletter")
     assert "those belong in the inbox" in newsletter.description.lower()
+
+
+def test_two_messages_with_identical_state_are_both_judged(settings, tmp_path):
+    """Same sender, subject, snippet and labels means the same cache key. The second
+    message must still get an answer — with its own id — and not fall to 'no judgment'.
+    This silently cost 2,180 decisions before it was fixed."""
+    from damien.store import Store, VerdictCache
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "model": "typesafe/jev-1.13", "provider": "typesafe",
+            "answers": {"bucket": {"type": "choice", "choice": "promotion", "confidence": 0.9}},
+            "usage": {"input_tokens": 10, "output_tokens": 0, "cost": 0},
+        })
+
+    live = dataclasses.replace(settings, judge="openrouter", api_key="k")
+    store = Store(tmp_path / "dup.db")
+    try:
+        from damien.decide import decide_all
+        cache = VerdictCache(store)
+        twin_a = a_message("twin", id="id-a", label_ids=["INBOX", "UNREAD"])
+        twin_b = a_message("twin", id="id-b", label_ids=["INBOX", "UNREAD"])   # identical state, different id
+        assert twin_a.model_dump(exclude={"id"}) == twin_b.model_dump(exclude={"id"})
+
+        judge = JevJudge(live, DEFAULT_SPEC, transport=httpx.MockTransport(handler), cache=cache)
+        decisions = decide_all([twin_a, twin_b], rules=[], judge=judge)
+        by_id = {d.message_id: d for d in decisions}
+        assert set(by_id) == {"id-a", "id-b"}
+        for mid in ("id-a", "id-b"):
+            assert by_id[mid].source is Source.jev, f"{mid} was not judged: {by_id[mid].rationale}"
+            assert by_id[mid].action is Action.trash
+
+        # and the returned verdicts name the message they answer for
+        verdicts = judge.judge([twin_a, twin_b], DEFAULT_SPEC.criteria())
+        assert [v.message_id for v in verdicts] == ["id-a", "id-b"]
+    finally:
+        store.close()
