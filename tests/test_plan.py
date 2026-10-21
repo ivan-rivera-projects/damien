@@ -7,7 +7,7 @@ import pytest
 from damien.decide import DEFAULT_SPEC
 from damien.jev import FakeJudge
 from damien.models import Action, Message, Source
-from damien.plan import apply_plan, approve, build_plan, sample_plan, undo_run
+from damien.plan import apply_plan, approve, build_plan, load_messages, sample_plan, undo_run
 from damien.rules import Condition, Rule
 from damien.store import Store
 
@@ -148,3 +148,57 @@ def test_a_person_correction_outranks_the_judge_on_the_next_plan(store: Store):
     assert item.action is Action.keep
     assert item.source is Source.person            # the person is named as the decider
     assert item.rule_id is None
+
+
+# ---- header caching + parallel fetch (#3) ------------------------------------
+def test_headers_come_from_the_cache_the_second_time(store: Store, gmail, fake):
+    for i in range(4):
+        fake.add(f"m{i}")
+    ids = gmail.list_ids("in:inbox")
+    first, fetched_first = load_messages(store=store, gmail=gmail, ids=ids)
+    assert len(first) == 4 and fetched_first == 4
+
+    before = gmail.fetched
+    second, fetched_second = load_messages(store=store, gmail=gmail, ids=ids)
+    assert fetched_second == 0 and gmail.fetched == before          # nothing was downloaded again
+    assert [m.id for m in second] == [m.id for m in first]          # same order, same content
+    assert second[0].subject == first[0].subject
+
+
+def test_a_zero_ttl_always_refetches(store: Store, gmail, fake):
+    fake.add("m1")
+    load_messages(store=store, gmail=gmail, ids=["m1"])
+    before = gmail.fetched
+    load_messages(store=store, gmail=gmail, ids=["m1"], ttl_hours=0)
+    assert gmail.fetched == before + 1
+
+
+def test_only_the_missing_ids_are_fetched(store: Store, gmail, fake):
+    for i in range(3):
+        fake.add(f"m{i}")
+    load_messages(store=store, gmail=gmail, ids=["m0"])
+    before = gmail.fetched
+    messages, fetched = load_messages(store=store, gmail=gmail, ids=["m0", "m1", "m2"])
+    assert fetched == 2 and gmail.fetched == before + 2
+    assert [m.id for m in messages] == ["m0", "m1", "m2"]           # order preserved across cache+fetch
+
+
+def test_parallel_fetch_keeps_order_and_gets_everything(gmail, fake):
+    for i in range(25):
+        fake.add(f"m{i:02d}")
+    ids = [f"m{i:02d}" for i in range(25)]
+    messages = gmail.fetch(ids, concurrency=8)
+    assert [m.id for m in messages] == ids
+    assert gmail.fetched == 25
+
+
+def test_build_plan_reports_what_came_from_cache(store: Store, gmail, fake):
+    for i in range(3):
+        fake.add(f"m{i}")
+    ids = gmail.list_ids("in:inbox")
+    messages, _ = load_messages(store=store, gmail=gmail, ids=ids)   # warm the cache
+    stats: dict[str, int] = {}
+    plan = build_plan(store=store, gmail=gmail, rules=[], judge=FakeJudge(), query="in:inbox",
+                      limit=None, stats=stats)
+    assert stats == {"messages": 3, "fetched": 0, "cached": 3}
+    assert len(plan.items) == 3

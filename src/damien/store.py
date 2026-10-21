@@ -365,6 +365,16 @@ class Store:
                 out.append(_message(row))
         return out
 
+    def seen_recently(self, ids: Sequence[str], since_iso: str) -> set[str]:
+        """Of these ids, the ones already fetched at or after `since_iso` (ISO-8601 sorts as text)."""
+        out: set[str] = set()
+        for chunk in _chunks(list(ids), 900):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                f"SELECT id FROM messages WHERE id IN ({placeholders}) AND seen_at >= ?", (*chunk, since_iso))
+            out.update(r["id"] for r in rows)
+        return out
+
     def count_messages(self, account: str | None = None) -> int:
         if account:
             return self.conn.execute("SELECT COUNT(*) AS n FROM messages WHERE account=?", (account,)).fetchone()["n"]

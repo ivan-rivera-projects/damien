@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
@@ -42,6 +43,7 @@ class Gmail:
         self._http = http or httpx.Client(timeout=60.0, transport=transport)
         self._creds: Any = None
         self._label_names: dict[str, str] | None = None
+        self.fetched = 0                                  # messages actually downloaded this run
 
     # ---- auth ---------------------------------------------------------
     def login(self, open_browser: bool = True) -> str:
@@ -169,28 +171,37 @@ class Gmail:
                 break
         return ids[:limit] if limit else ids
 
-    def fetch(self, ids: Sequence[str], *, with_snippet: bool = True) -> list[Message]:
-        """Headers for a set of ids. One call per id — so call it once per message, ever."""
-        out: list[Message] = []
-        for mid in ids:
-            data = self._request("GET", f"{API}/messages/{mid}",
-                                 params={"format": "metadata", "metadataHeaders": list(HEADERS)})
-            payload = data.get("payload", {})
-            hdrs = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
-            parts = payload.get("parts") or []
-            out.append(Message(
-                id=data["id"], account=self.settings.account or "me", thread_id=data.get("threadId"),
-                internal_date=int(data.get("internalDate") or 0) or None,
-                from_addr=_address(hdrs.get("from")), from_name=_display(hdrs.get("from")),
-                to=hdrs.get("to"), subject=hdrs.get("subject"),
-                snippet=data.get("snippet") if with_snippet else None,
-                label_ids=list(data.get("labelIds") or []),
-                has_attachment=any(p.get("filename") for p in parts),
-                list_unsubscribe="list-unsubscribe" in hdrs,
-                list_id=hdrs.get("list-id"),
-                size_estimate=data.get("sizeEstimate"),
-            ))
-        return out
+    def fetch(self, ids: Sequence[str], *, with_snippet: bool = True, concurrency: int | None = None) -> list[Message]:
+        """Headers for a set of ids. One call per id — so call it once per message, ever.
+
+        Parallel by default: 200 sequential calls were ~30 of the ~40 seconds a real
+        200-message pass took. Order is preserved.
+        """
+        workers = max(1, concurrency or self.settings.fetch_concurrency)
+        if len(ids) > 1 and workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                return list(pool.map(lambda mid: self._fetch_one(mid, with_snippet), ids))
+        return [self._fetch_one(mid, with_snippet) for mid in ids]
+
+    def _fetch_one(self, mid: str, with_snippet: bool) -> Message:
+        self.fetched += 1
+        data = self._request("GET", f"{API}/messages/{mid}",
+                             params={"format": "metadata", "metadataHeaders": list(HEADERS)})
+        payload = data.get("payload", {})
+        hdrs = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
+        parts = payload.get("parts") or []
+        return Message(
+            id=data["id"], account=self.settings.account or "me", thread_id=data.get("threadId"),
+            internal_date=int(data.get("internalDate") or 0) or None,
+            from_addr=_address(hdrs.get("from")), from_name=_display(hdrs.get("from")),
+            to=hdrs.get("to"), subject=hdrs.get("subject"),
+            snippet=data.get("snippet") if with_snippet else None,
+            label_ids=list(data.get("labelIds") or []),
+            has_attachment=any(p.get("filename") for p in parts),
+            list_unsubscribe="list-unsubscribe" in hdrs,
+            list_id=hdrs.get("list-id"),
+            size_estimate=data.get("sizeEstimate"),
+        )
 
     # ---- writes (all bulk) -------------------------------------------
     def modify(self, ids: Sequence[str], *, add: Iterable[str] = (), remove: Iterable[str] = ()) -> int:

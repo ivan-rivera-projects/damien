@@ -27,7 +27,7 @@ from .decide import DEFAULT_SPEC
 from .gmail import Gmail, GmailError
 from .jev import FakeJudge, make_judge
 from .models import Action
-from .plan import apply_plan, approve, build_plan, sample_plan, undo_run
+from .plan import apply_plan, approve, build_plan, load_messages, sample_plan, undo_run
 from .rules import default_rules, load_rules, save_rules
 from .store import open_store
 
@@ -120,7 +120,8 @@ def scan(
     with open_store(settings) as store:
         try:
             ids = gmail.list_ids(query, limit=limit)
-            messages = gmail.fetch(ids) if ids else []
+            messages, _fetched = load_messages(store=store, gmail=gmail, ids=ids,
+                                               ttl_hours=settings.header_ttl_hours)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)
@@ -146,9 +147,11 @@ def plan_build(
     gmail = _gmail(settings)
     rules = _rules(settings, rules_path)
     judge = _judge(settings, judge_mode)
+    stats: dict[str, int] = {}
     with open_store(settings) as store:
         try:
             plan = build_plan(store=store, gmail=gmail, rules=rules, judge=judge, query=query, limit=limit,
+                              ttl_hours=settings.header_ttl_hours, stats=stats,
                               judge_batch=settings.judge_batch, ask_below=settings.confidence_ask,
                               protected_labels=settings.protect_labels, model=settings.model)
         except GmailError as exc:
@@ -166,6 +169,8 @@ def plan_build(
         return
 
     typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))", bold=True)
+    if stats:
+        typer.echo(f"  headers: {stats['cached']} from cache · {stats['fetched']} fetched from Gmail")
     for action, n in sorted(counts.items()):
         typer.echo(f"  {action:<10} {n}")
     if calls:

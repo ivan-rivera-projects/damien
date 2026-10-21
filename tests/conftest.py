@@ -102,6 +102,7 @@ def settings(tmp_path: Path) -> Settings:
         token_path=tmp_path / "token.json", account="me@example.com", scopes=("x",), judge="fake",
         model="jev-latest", api_key=None, page_size=2, op_batch=2, judge_batch=2,
         confidence_act=0.8, confidence_ask=0.55, protect_labels=("ACTION REQUIRED", "WAITING FOR"),
+        header_ttl_hours=12.0, fetch_concurrency=4,
     )
 
 

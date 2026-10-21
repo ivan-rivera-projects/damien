@@ -60,6 +60,8 @@ class Settings:
     confidence_act: float         # >= this: act unattended
     confidence_ask: float         # < this: a person should look
     protect_labels: tuple[str, ...]   # the person's own labels a model must not file away
+    header_ttl_hours: float       # reuse stored headers younger than this (0 = always refetch)
+    fetch_concurrency: int        # parallel Gmail metadata calls
 
     def redacted(self) -> dict[str, object]:
         d = dict(self.__dict__)
@@ -108,6 +110,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
         judge_batch=int(num("DAMIEN_JUDGE_BATCH", 8)),
         confidence_act=num("DAMIEN_CONFIDENCE_ACT", 0.80),
         confidence_ask=num("DAMIEN_CONFIDENCE_ASK", 0.55),
+        header_ttl_hours=num("DAMIEN_HEADER_TTL_HOURS", 12.0),
+        fetch_concurrency=int(num("DAMIEN_FETCH_CONCURRENCY", 8)),
         protect_labels=tuple(
             p.strip() for p in (env("DAMIEN_PROTECT_LABELS") or ",".join(DEFAULT_PROTECTED)).split(",") if p.strip()
         ),

@@ -10,6 +10,7 @@ from __future__ import annotations
 import random
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from .decide import DEFAULT_SPEC, Judge, JudgementSpec, apply_corrections, decide_all
 from .gmail import Gmail
@@ -17,6 +18,31 @@ from .models import Action, Message, Plan, PlanItem, Run, RunBatch
 from .rules import Rule
 from .stakes import DEFAULT_PROTECTED
 from .store import Store
+
+
+DEFAULT_HEADER_TTL_HOURS = 12.0
+
+
+def load_messages(*, store: Store, gmail: Gmail, ids: Sequence[str],
+                  ttl_hours: float = DEFAULT_HEADER_TTL_HOURS) -> tuple[list[Message], int]:
+    """Headers for these ids: from the store when they are fresh, from Gmail otherwise.
+
+    Headers do not change; labels do. The TTL is the honesty dial — inside it we
+    reuse what we already downloaded (a re-plan costs nothing), and past it we pay
+    for a fresh copy. `ttl_hours=0` always refetches.
+    """
+    ids = list(ids)
+    if not ids:
+        return [], 0
+    cutoff = None if ttl_hours <= 0 else (datetime.now(UTC) - timedelta(hours=ttl_hours)).isoformat()
+    fresh = store.seen_recently(ids, cutoff) if cutoff else set()
+    missing = [i for i in ids if i not in fresh]
+    fetched = gmail.fetch(missing) if missing else []
+    if fetched:
+        store.upsert_messages(fetched)
+    cached = store.get_messages([i for i in ids if i in fresh]) if fresh else []
+    by_id = {m.id: m for m in [*cached, *fetched]}
+    return [by_id[i] for i in ids if i in by_id], len(fetched)
 
 
 def build_plan(
@@ -31,6 +57,8 @@ def build_plan(
     judge_batch: int = 8,
     ask_below: float = 0.55,
     protected_labels: Sequence[str] = (),
+    ttl_hours: float = DEFAULT_HEADER_TTL_HOURS,
+    stats: dict[str, int] | None = None,
     limit: int | None = None,
     model: str | None = None,
 ) -> Plan:
@@ -39,14 +67,18 @@ def build_plan(
     `messages` may be supplied instead of `gmail` (tests, or a re-plan from the
     store) — that is what keeps this offline-testable.
     """
+    fetched = 0
     if messages is None:
         if gmail is None:
             raise ValueError("build_plan needs either gmail or messages")
         ids = gmail.list_ids(query, limit=limit)
-        messages = gmail.fetch(ids) if ids else []
-
-    if messages:
+        messages, fetched = load_messages(store=store, gmail=gmail, ids=ids, ttl_hours=ttl_hours)
+    else:
         store.upsert_messages(messages)
+    if stats is not None:
+        stats["messages"] = len(messages)
+        stats["fetched"] = fetched
+        stats["cached"] = len(messages) - fetched
 
     label_names = gmail.labels() if gmail is not None else None
     decisions = decide_all(messages, rules=rules, judge=judge, spec=spec, batch_size=judge_batch,
