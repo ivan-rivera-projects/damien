@@ -412,8 +412,8 @@ def rules_plan(
     rules_path: Path | None = typer.Option(None, "--rules", help="A candidate rules file, instead of the live one."),
     limit: int | None = typer.Option(None, "--limit", "-n", help="Cap the matches per rule."),
     sample: int = typer.Option(10, "--sample", help="Messages to fetch so the plan can be read."),
-    all_mail: bool = typer.Option(False, "--all-mail",
-                                  help="Do not scope the rule to the inbox (rarely what you want)."),
+    scope: str = typer.Option("in:inbox", "--scope",
+                              help="Gmail query the rules run inside, e.g. \"in:inbox after:2025/01/01 before:2026/01/01\". Empty = the whole mailbox."),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """Build a plan from rules Gmail can evaluate itself — no headers, no model.
@@ -433,7 +433,7 @@ def rules_plan(
     with open_store(settings) as store:
         try:
             plan = plan_from_rules(store=store, gmail=gmail, rules=rules, limit=limit, sample=sample,
-                                   scope="" if all_mail else "in:inbox")
+                                   scope=scope)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)
