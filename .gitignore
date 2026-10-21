@@ -1,0 +1,19 @@
+# secrets and local state — never commit
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+credentials.json
+token.json
+*.token
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
