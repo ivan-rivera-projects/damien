@@ -29,7 +29,9 @@ def test_the_three_real_misses_are_now_held():
 
 
 def test_money_deadlines_accounts_and_legal_are_all_held():
-    for subject in ("Invoice 4471 from Acme", "Past due: your subscription",
+    for subject in ("ALARM: \"Conspire-TenantInvariant-Violations-dev\" in US East",
+                    "Your Project: ForAIversion is at risk of suspension",
+                    "Invoice 4471 from Acme", "Past due: your subscription",
                     "Your card was declined", "Security alert: new sign-in",
                     "Action required: verify your account", "Contract renewal notice",
                     "Your verification code", "IRS notice"):

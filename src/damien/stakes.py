@@ -23,7 +23,8 @@ from .models import Action, Message
 # must see. "Action required: Invoice overdue" was being labelled Receipts.
 ALARM = re.compile(
     r"\b(overdue|past due|unsuccessful|failed|declined|insufficient|suspend|suspended|locked|"
-    r"unauthori[sz]ed|breach|action required|final notice|terminated|rejected|disputed)\b",
+    r"unauthori[sz]ed|breach|action required|final notice|terminated|rejected|disputed|"
+    r"alarm|at risk|will be suspended)\b",
     re.IGNORECASE,
 )
 
