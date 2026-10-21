@@ -12,10 +12,10 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from .decide import DEFAULT_SPEC, Judge, JudgementSpec, apply_corrections, decide_all
-from .stakes import DEFAULT_PROTECTED
 from .gmail import Gmail
 from .models import Action, Message, Plan, PlanItem, Run, RunBatch
 from .rules import Rule
+from .stakes import DEFAULT_PROTECTED
 from .store import Store
 
 
