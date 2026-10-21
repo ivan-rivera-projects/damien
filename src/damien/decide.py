@@ -97,8 +97,9 @@ DEFAULT_SPEC = JudgementSpec(
         Bucket("newsletter", "A newsletter or digest he subscribed to that is not about fashion, "
                              "music, AI or technology — those belong in the inbox", Action.label,
                "Newsletters"),
-        Bucket("promotion", "A discount, sale or advertising blast from a retailer or service he "
-                            "does not deal with — never a clothing or music brand he follows", Action.trash),
+        Bucket("promotion", "A discount, sale, pitch or upsell — including marketing from a company he "
+                            "already uses, which is still marketing, and never news about that company's "
+                            "field. Never a clothing or music brand he follows", Action.trash),
         Bucket("notification", "Automated notification (social, app, security, shipping) with nothing to do",
                Action.archive),
         Bucket("archive", "Once-useful, now done: keep the message, get it out of the way",
