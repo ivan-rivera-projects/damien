@@ -244,9 +244,14 @@ def plan_digest(
     similarity: float = typer.Option(DEFAULT_SIMILARITY, "--similarity",
                                      help="How alike two messages must be to share a group."),
     embed_missing: bool = typer.Option(True, "--embed/--no-embed", help="Embed messages that have no vector yet."),
+    min_size: int = typer.Option(1, "--min-size", help="Hide groups smaller than this."),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Collapse a plan into review groups — one decision per group, not per message."""
+    """Collapse a plan into review groups — one decision per group, not per message.
+
+    `--min-size` is how a plan of thousands gets read: the big groups are the
+    decisions, and the singletons are what `plan apply` handles by confidence.
+    """
     settings = _load()
     with open_store(settings) as store:
         plan = store.get_plan(plan_id)
@@ -267,9 +272,14 @@ def plan_digest(
                                "groups": [g.__dict__ for g in groups]}, indent=2))
         return
 
+    shown = [g for g in groups if len(g.message_ids) >= min_size]
+    hidden = [g for g in groups if len(g.message_ids) < min_size]
     typer.secho(f"plan {plan.id} — {len(plan.items)} message(s) in {len(groups)} group(s)", bold=True)
+    if hidden:
+        n = sum(len(g.message_ids) for g in hidden)
+        typer.secho(f"  ({len(hidden)} group(s) of fewer than {min_size} hidden — {n} message(s))", dim=True)
     current = None
-    for group in groups:
+    for group in shown:
         if group.action != current:
             current = group.action
             typer.secho(f"\n{current}", bold=True)

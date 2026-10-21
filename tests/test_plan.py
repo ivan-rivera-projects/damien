@@ -437,3 +437,17 @@ def test_a_long_fetch_keeps_what_it_already_got(store: Store, gmail, fake):
         pass
     assert store.count_messages() >= 4               # the first window survived the failure
     assert g.fetched >= 4
+
+
+def test_a_size_floor_hides_the_singletons(store: Store):
+    """At 2,142 messages the digest makes about two hundred groups; the ones worth
+    reading are the big ones."""
+    store.upsert_messages([Message(id=f"m{i}", account="a", subject=f"promo {i}", from_addr=f"a@s{i}.com")
+                           for i in range(4)])
+    store.put_embeddings([("m0", "t", [1.0, 0.0]), ("m1", "t", [1.0, 0.0]),
+                          ("m2", "t", [0.0, 1.0]), ("m3", "t", [0.5, 0.5])], "t")
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id=f"m{i}", action=Action.trash, source=Source.jev) for i in range(4)])
+    groups = digest_plan(plan, store, similarity=0.9)
+    assert len(groups) == 3
+    assert max(len(g.message_ids) for g in groups) == 2       # the pair, then two singletons
