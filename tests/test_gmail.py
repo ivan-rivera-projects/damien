@@ -101,3 +101,60 @@ def test_an_empty_query_still_means_the_inbox(gmail: Gmail, fake):
     fake.add("m1")
     gmail.list_ids("")
     assert fake.queries[0] == "in:inbox -in:spam -in:trash"
+
+
+# ---- throttling: Gmail says "too fast" with a 403, not a 429 --------------------
+def test_a_403_quota_error_is_retried_not_fatal(settings):
+    import httpx
+    from conftest import FakeCreds
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return httpx.Response(403, json={"error": {"code": 403, "message":
+                        "Quota exceeded for quota metric 'Total Query Cost' and limit "
+                        "'Units per minute per user' of service 'gmail.googleapis.com'"}})
+        return httpx.Response(200, json={"emailAddress": "me@example.com"})
+
+    g = Gmail(settings, http=httpx.Client(transport=httpx.MockTransport(handler)))
+    g._creds = FakeCreds()
+    g.limiter = type("L", (), {"take": lambda self: 0.0})()          # no pacing in the test
+    assert g.profile()["emailAddress"] == "me@example.com"
+    assert calls["n"] == 3 and g.throttled == 2
+
+
+def test_a_403_that_is_not_a_throttle_still_raises(settings):
+    import httpx
+    import pytest
+    from conftest import FakeCreds
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": {"code": 403, "message": "Insufficient Permission"}})
+
+    g = Gmail(settings, http=httpx.Client(transport=httpx.MockTransport(handler)))
+    g._creds = FakeCreds()
+    g.limiter = type("L", (), {"take": lambda self: 0.0})()
+    with pytest.raises(Exception, match="Insufficient Permission"):
+        g.profile()
+
+
+def test_retry_after_header_is_honoured():
+    import httpx
+
+    from damien.gmail import _is_throttle, _retry_after
+    throttled = httpx.Response(403, headers={"Retry-After": "7"}, text="Quota exceeded")
+    assert _is_throttle(throttled) is True
+    assert _retry_after(throttled) == 7.0
+    assert _is_throttle(httpx.Response(403, text="Insufficient Permission")) is False
+    assert _retry_after(httpx.Response(200)) is None
+
+
+def test_the_rate_limiter_paces(settings):
+    from damien.gmail import RateLimiter
+    limiter = RateLimiter(rate_per_second=50)
+    t0 = __import__("time").monotonic()
+    for _ in range(10):
+        limiter.take()
+    assert __import__("time").monotonic() - t0 < 1.0        # a burst inside the bucket is free

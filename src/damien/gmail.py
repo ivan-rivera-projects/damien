@@ -18,6 +18,7 @@ pass costs about fifteen requests instead of five thousand:
 from __future__ import annotations
 
 import random
+import threading
 import time
 from collections.abc import Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,38 @@ class GmailError(RuntimeError):
     pass
 
 
+class RateLimiter:
+    """A token bucket.
+
+    Gmail's quota is charged per unit per minute and a burst is what trips it —
+    eight parallel metadata calls are 40 units/second, fine, but not when another
+    pass is paging at the same time. This keeps the whole process under a rate we
+    choose instead of discovering the ceiling with a 403.
+    """
+
+    def __init__(self, rate_per_second: float):
+        self.rate = max(0.1, rate_per_second)
+        self.capacity = max(1.0, self.rate)
+        self._tokens = self.capacity
+        self._updated = time.monotonic()
+        self._lock = threading.Lock()
+
+    def take(self) -> float:
+        """Block until one request may go. Returns the seconds waited."""
+        waited = 0.0
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                self._tokens = min(self.capacity, self._tokens + (now - self._updated) * self.rate)
+                self._updated = now
+                if self._tokens >= 1:
+                    self._tokens -= 1
+                    return waited
+                sleep_for = (1 - self._tokens) / self.rate
+            time.sleep(min(sleep_for, 0.2))
+            waited += min(sleep_for, 0.2)
+
+
 class Gmail:
     def __init__(self, settings: Settings, http: httpx.Client | None = None, transport: httpx.BaseTransport | None = None):
         self.settings = settings
@@ -44,6 +77,8 @@ class Gmail:
         self._creds: Any = None
         self._label_names: dict[str, str] | None = None
         self.fetched = 0                                  # messages actually downloaded this run
+        self.throttled = 0                                # times Gmail said "too fast"
+        self.limiter = RateLimiter(getattr(settings, "max_rps", 20.0))
 
     # ---- auth ---------------------------------------------------------
     def login(self, open_browser: bool = True) -> str:
@@ -102,10 +137,12 @@ class Gmail:
 
     # ---- transport ----------------------------------------------------
     def _request(self, method: str, url: str, *, params: dict | None = None, json_body: dict | None = None,
-                 attempts: int = 5) -> dict:
+                 attempts: int = 6) -> dict:
         delay = 0.5
         last: Exception | None = None
         for attempt in range(attempts):
+            self.limiter.take()
+            resp: httpx.Response | None = None
             try:
                 resp = self._http.request(
                     method, url, params=params, json=json_body,
@@ -117,14 +154,20 @@ class Gmail:
                 if resp.status_code == 401 and attempt == 0:
                     self._force_refresh()                       # token aged out mid-run: refresh once, in place
                     continue
-                if resp.status_code in (429, 500, 502, 503, 504):  # quota/backoff: retry
+                if resp.status_code in (429, 500, 502, 503, 504, 529) or _is_throttle(resp):
+                    # Gmail reports a quota breach as 403, not 429. A 403 that is not a
+                    # throttle is a real refusal and still raises.
+                    if resp.status_code == 429 or _is_throttle(resp):
+                        self.throttled += 1
+                        delay = max(delay, 2.0)
                     last = GmailError(f"{resp.status_code}: {resp.text[:200]}")
                 elif resp.status_code >= 400:
                     raise GmailError(f"{method} {url} -> {resp.status_code}: {resp.text[:400]}")
                 else:
                     return resp.json() if resp.content else {}
-            time.sleep(delay + random.random() * 0.2)
-            delay = min(delay * 2, 8.0)
+            wait = _retry_after(resp) if resp is not None else None
+            time.sleep(wait if wait is not None else delay + random.random() * 0.2)
+            delay = min(delay * 2, 60.0)
         raise GmailError(f"gave up after {attempts} attempts: {last}")
 
     # ---- reads --------------------------------------------------------
@@ -178,7 +221,11 @@ class Gmail:
         200-message pass took. Order is preserved.
         """
         workers = max(1, concurrency or self.settings.fetch_concurrency)
-        if len(ids) > 1 and workers > 1:
+        total = len(ids)
+        if total >= 250:
+            import sys
+            print(f"  fetching {total} messages ({workers} at a time)…", file=sys.stderr, flush=True)
+        if total > 1 and workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 return list(pool.map(lambda mid: self._fetch_one(mid, with_snippet), ids))
         return [self._fetch_one(mid, with_snippet) for mid in ids]
@@ -227,6 +274,29 @@ class Gmail:
 
     def add_label(self, ids: Sequence[str], label_id: str, *, keep_in_inbox: bool = False) -> int:
         return self.modify(ids, add=[label_id], remove=[] if keep_in_inbox else ["INBOX"])
+
+
+THROTTLE_MARKS = ("Quota exceeded", "rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED",
+                  "Too many requests", "Rate Limit")
+
+
+def _is_throttle(resp: httpx.Response) -> bool:
+    """A 403 that means 'slow down' rather than 'not allowed'."""
+    if resp.status_code != 403:
+        return False
+    return any(mark in resp.text for mark in THROTTLE_MARKS)
+
+
+def _retry_after(resp: httpx.Response | None) -> float | None:
+    if resp is None:
+        return None
+    raw = resp.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return min(float(raw), 120.0)
+    except ValueError:
+        return None
 
 
 def _exclude_spam_and_trash(query: str) -> str:

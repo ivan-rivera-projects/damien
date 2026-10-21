@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from .decide import DEFAULT_SPEC, Judge, JudgementSpec, apply_corrections, decide_all
 from .embed import DEFAULT_SIMILARITY, cluster
 from .gmail import Gmail
-from .models import Action, Message, Plan, PlanItem, Run, RunBatch
+from .models import Action, Message, Plan, PlanItem, Run, RunBatch, Source
 from .rules import Rule
 from .stakes import DEFAULT_PROTECTED
 from .store import Store
@@ -217,7 +217,8 @@ def approve(store: Store, plan_id: str) -> str:
 
 
 def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: bool = True,
-               only: Action | None = None, message_ids: Sequence[str] | None = None) -> Run:
+               only: Action | None = None, message_ids: Sequence[str] | None = None,
+               min_confidence: float | None = None) -> Run:
     """Execute an approved plan in bulk batches, journaling each one.
 
     Idempotent by batch index: re-running a half-finished plan with `resume`
@@ -225,6 +226,10 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
 
     `only` applies one action of the plan — the slice a person has actually read —
     and leaves the rest approved for a later pass.
+
+    `min_confidence` keeps only what the model was sure about, which is how a plan of
+    twenty thousand messages is worked through without reading all of it: take the
+    certain, leave the doubtful.
     """
     plan = store.get_plan(plan_id)
     if plan is None:
@@ -243,7 +248,10 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
     label_cache = gmail.labels()
     wanted = set(message_ids) if message_ids is not None else None
     items = [i for i in plan.items
-             if (only is None or i.action is only) and (wanted is None or i.message_id in wanted)]
+             if (only is None or i.action is only)
+             and (wanted is None or i.message_id in wanted)
+             and (min_confidence is None or i.source in (Source.rule, Source.person)
+                  or (i.confidence or 0.0) >= min_confidence)]
     if (only is not None or wanted is not None) and not items:
         raise ValueError(f"plan {plan_id} has nothing to do for {only.value if only else 'those messages'}")
     groups = _group_items(items)
@@ -268,7 +276,7 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
         store.finish_run(run.id, "partial", error=str(exc)[:500])
         raise
     store.finish_run(run.id, "ok")
-    subset = only is not None or wanted is not None
+    subset = only is not None or wanted is not None or min_confidence is not None
     store.set_plan_status(plan.id, "partly_applied" if subset else "applied")
     return store.get_run(run.id)  # type: ignore[return-value]
 

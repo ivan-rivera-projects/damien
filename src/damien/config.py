@@ -62,6 +62,7 @@ class Settings:
     protect_labels: tuple[str, ...]   # the person's own labels a model must not file away
     header_ttl_hours: float       # reuse stored headers younger than this (0 = always refetch)
     fetch_concurrency: int        # parallel Gmail metadata calls
+    max_rps: float                # ceiling on Gmail requests/second (quota is per minute)
 
     def redacted(self) -> dict[str, object]:
         d = dict(self.__dict__)
@@ -112,6 +113,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         confidence_ask=num("DAMIEN_CONFIDENCE_ASK", 0.55),
         header_ttl_hours=num("DAMIEN_HEADER_TTL_HOURS", 12.0),
         fetch_concurrency=int(num("DAMIEN_FETCH_CONCURRENCY", 8)),
+        max_rps=num("DAMIEN_MAX_RPS", 20.0),
         protect_labels=tuple(
             p.strip() for p in (env("DAMIEN_PROTECT_LABELS") or ",".join(DEFAULT_PROTECTED)).split(",") if p.strip()
         ),

@@ -334,3 +334,30 @@ def test_a_group_number_that_does_not_exist_says_so(store: Store):
     store.upsert_messages([Message(id="m1", account="a", subject="x")])
     with pytest.raises(ValueError, match="run `damien plan digest"):
         group_by_index(plan, store, 99)
+
+
+def test_a_confidence_floor_takes_the_certain_and_leaves_the_doubtful(store: Store, gmail, fake):
+    """At 20,000 messages nobody reads every group: take the sure ones, leave the rest."""
+    store.upsert_messages([Message(id=f"m{i}", account="a", subject=f"s{i}", label_ids=["INBOX", "UNREAD"])
+                           for i in range(4)])
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id="m0", action=Action.trash, source=Source.jev, confidence=0.95),
+        PlanItem(message_id="m1", action=Action.trash, source=Source.jev, confidence=0.72),
+        PlanItem(message_id="m2", action=Action.trash, source=Source.jev, confidence=0.61),
+        PlanItem(message_id="m3", action=Action.trash, source=Source.rule, rule_id="r1"),
+    ])
+    token = approve(store, plan.id)
+    run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, min_confidence=0.9)
+    assert run.applied == 2                                  # 0.95 and the rule, not 0.72 or 0.61
+    assert set(fake.mods[0]["ids"]) == {"m0", "m3"}
+    assert store.get_plan(plan.id).status == "partly_applied"
+
+
+def test_a_person_decision_always_passes_the_confidence_floor(store: Store, gmail, fake):
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id="m1", action=Action.trash, source=Source.person, confidence=1.0),
+        PlanItem(message_id="m2", action=Action.trash, source=Source.jev, confidence=0.4),
+    ])
+    token = approve(store, plan.id)
+    run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, min_confidence=0.9)
+    assert run.applied == 1 and fake.mods[0]["ids"] == ["m1"]

@@ -323,6 +323,8 @@ def plan_apply(
     token: str = typer.Option(..., "--token"),
     yes: bool = typer.Option(False, "--yes", help="Required: this writes to Gmail."),
     only: str | None = typer.Option(None, "--only", help="Apply one action of the plan: trash|archive|label|mark_read."),
+    min_confidence: float | None = typer.Option(None, "--min-confidence",
+                                               help="Apply only what the model was sure about (rules and your own decisions always pass)."),
 ) -> None:
     """Apply an approved plan, in bulk batches, journalling every one.
 
@@ -343,11 +345,14 @@ def plan_apply(
     gmail = _gmail(settings)
     with open_store(settings) as store:
         try:
-            run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token, only=parsed_only)
+            run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token, only=parsed_only,
+                             min_confidence=min_confidence)
         except (ValueError, GmailError) as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)
     slice_note = f" ({parsed_only.value} slice)" if parsed_only else ""
+    if min_confidence is not None:
+        slice_note += f" at confidence >= {min_confidence}"
     typer.secho(f"run {run.id} {run.status}: {run.applied} message(s) in {len(run.batches)} batch(es){slice_note}", fg="green")
     if parsed_only:
         typer.secho("the rest of the plan is still approved", dim=True)
