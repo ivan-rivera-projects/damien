@@ -219,3 +219,40 @@ def test_a_big_category_group_can_still_mint_a_category_rule_for_an_action():
                 for i in range(9)]
     rules, _ = mint_rules(messages, Action.label, "Promos")
     assert len(rules) == 1 and rules[0].match[0].value == "CATEGORY_PROMOTIONS"
+
+
+# ---- minting from sender consistency ----------------------------------------
+def test_a_sender_that_agrees_with_itself_becomes_a_rule():
+    from damien.rules import mint_rules_by_sender
+    counts = [("shop.example", Action.keep, None, 30),
+              ("dsw.example", Action.trash, None, 36), ("dsw.example", Action.keep, None, 1),
+              ("nocafe.example", Action.label, "Newsletters", 12)]
+    rules, why = mint_rules_by_sender(counts, min_count=5, agreement=0.9)
+    by_id = {r.id: r for r in rules}
+    assert set(by_id) == {"auto-from-shop-example", "auto-from-dsw-example", "auto-from-nocafe-example"}
+    assert by_id["auto-from-dsw-example"].action is Action.trash      # 36/37 still counts as one-way
+    assert by_id["auto-from-nocafe-example"].label == "Newsletters"
+    assert "agreed with themselves" in why
+
+
+def test_a_sender_split_between_two_answers_gets_no_rule():
+    """linkedin.com in a real plan: 87 keep, 32 archive. Flattening it with a rule
+    would be worse than leaving it to judgment."""
+    from damien.rules import mint_rules_by_sender
+    counts = [("linkedin.com", Action.keep, None, 87), ("linkedin.com", Action.archive, None, 32)]
+    rules, why = mint_rules_by_sender(counts, min_count=5, agreement=0.9)
+    assert rules == []
+    assert "split between actions" in why and "linkedin.com" in why
+
+
+def test_a_rare_sender_is_left_alone():
+    from damien.rules import mint_rules_by_sender
+    rules, _ = mint_rules_by_sender([("rare.example", Action.trash, None, 2)], min_count=5)
+    assert rules == []
+
+
+def test_minting_never_exceeds_its_own_cap():
+    from damien.rules import mint_rules_by_sender
+    counts = [(f"s{i}.example", Action.trash, None, 9) for i in range(30)]
+    rules, _ = mint_rules_by_sender(counts, min_count=5, max_rules=10)
+    assert len(rules) == 10

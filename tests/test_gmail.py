@@ -211,3 +211,10 @@ def test_the_default_pace_is_under_the_ceiling_that_tripped_gmail():
     from damien import config
     source = inspect.getsource(config.load_settings)
     assert 'num("DAMIEN_MAX_RPS", 8.0)' in source
+
+
+def test_restoring_a_message_is_the_inverse_of_trashing_it(gmail: Gmail, fake):
+    gmail.trash(["m1", "m2"])
+    assert fake.mods[0]["addLabelIds"] == ["TRASH"]
+    gmail.untrash(["m1"])
+    assert fake.mods[-1] == {"ids": ["m1"], "addLabelIds": ["INBOX"], "removeLabelIds": ["TRASH"]}

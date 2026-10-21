@@ -39,7 +39,13 @@ from .plan import (
     sample_plan,
     undo_run,
 )
-from .rules import default_rules, load_rules, mint_rules, save_rules
+from .rules import (
+    default_rules,
+    load_rules,
+    mint_rules,
+    mint_rules_by_sender,
+    save_rules,
+)
 from .store import VerdictCache, open_store
 
 app = typer.Typer(add_completion=False, help="Damien — Gmail triage: rules first, a System One model for judgment, code for every write.")
@@ -469,6 +475,55 @@ def rules_plan(
     typer.echo(f"  damien plan apply {plan.id} --token <t> --yes")
 
 
+@rules_app.command("from-senders")
+def rules_from_senders(
+    plan_id: str,
+    min_count: int = typer.Option(5, "--min-count", help="Ignore senders with fewer messages than this."),
+    agreement: float = typer.Option(0.9, "--agreement", help="How one-way a sender has to be."),
+    max_rules: int = typer.Option(80, "--max", help="Stop after this many rules."),
+    yes: bool = typer.Option(False, "--yes", help="Required: this writes rules.json."),
+) -> None:
+    """Make every consistently-decided sender permanent — the step that keeps it clean.
+
+    A rule per sender is what stops a mailbox being re-judged every pass, and what
+    stops one sender's mail landing in two different places.
+    """
+    settings = _load()
+    with open_store(settings) as store:
+        rows = list(store.conn.execute("""
+            SELECT split_part(m.from_addr, '@', 2) AS domain, i.action, i.label, count(*) AS n
+              FROM plan_items i JOIN messages m ON m.id = i.message_id
+             WHERE i.plan_id = ? AND m.from_addr LIKE '%@%'
+             GROUP BY 1, 2, 3""", (plan_id,)))
+        if not rows:
+            typer.secho(f"no plan items with senders for {plan_id}", fg="red")
+            raise typer.Exit(1)
+
+    counts = [(r["domain"], Action(r["action"]), r["label"], r["n"]) for r in rows]
+    minted, why = mint_rules_by_sender(counts, min_count=min_count, agreement=agreement, max_rules=max_rules)
+    typer.secho(why, bold=True)
+    if not minted:
+        typer.secho("nothing to mint", fg="yellow")
+        return
+    from .rules import to_query
+    by_action: dict[str, list] = {}
+    for rule in minted:
+        by_action.setdefault(rule.action.value, []).append(rule)
+    for action in sorted(by_action):
+        typer.secho(f"\n{action}", bold=True)
+        for rule in by_action[action]:
+            typer.echo(f"  {rule.match[0].value:<32} {to_query(rule) or ''}")
+    if not yes:
+        typer.secho(f"\n{len(minted)} rule(s) not written — re-run with --yes", fg="yellow")
+        return
+    path = settings.root / "rules.json"
+    existing = {r.id: r for r in load_rules(path)}
+    for rule in minted:
+        existing[rule.id] = rule
+    save_rules(path, list(existing.values()))
+    typer.secho(f"\nwrote {len(minted)} rule(s) to {path} ({len(existing)} total)", fg="green")
+
+
 @rules_app.command("from-group")
 def rules_from_group(
     plan_id: str,
@@ -547,6 +602,33 @@ def rules_list(json_out: bool = typer.Option(False, "--json")) -> None:
     for r in rows:
         server = r["gmail_query"] or "(runs in Python over listed mail)"
         typer.echo(f"  {r['id']:<22} {r['action']:<9} {server}")
+
+
+@app.command()
+def restore(
+    message_id: list[str] = typer.Argument(..., help="One or more message ids."),
+    note: str | None = typer.Option(None, "--note"),
+) -> None:
+    """Put a message back in the inbox, and record that you wanted it there.
+
+    The inverse of trashing one message — because a whole run is a blunt thing to undo
+    when the model got exactly one of three hundred wrong. Also records the correction,
+    so the next plan agrees with you.
+    """
+    settings = _load()
+    gmail = _gmail(settings)
+    try:
+        n = gmail.untrash(message_id)
+    except GmailError as exc:
+        typer.secho(str(exc), fg="red")
+        raise typer.Exit(1)
+    with open_store(settings) as store:
+        for mid in message_id:
+            store.correct(mid, Action.keep, note=note)
+        refreshed = gmail.fetch(message_id)
+        store.upsert_messages(refreshed)
+    typer.secho(f"restored {n} message(s) to the inbox", fg="green")
+    typer.secho("recorded as a correction, so the next plan keeps it", dim=True)
 
 
 @app.command()

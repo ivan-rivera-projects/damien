@@ -260,6 +260,48 @@ def mint_rules(messages: Iterable[Message], action: Action, label: str | None, *
                 f"— apply the group, or name the senders you want a rule for")
 
 
+def mint_rules_by_sender(counts: Iterable[tuple[str, Action, str | None, int]], *,
+                         min_count: int = 5, agreement: float = 0.9,
+                         max_rules: int = 80) -> tuple[list[Rule], str]:
+    """A rule for every sender a plan decided the same way, over and over.
+
+    This is what keeps a large mailbox cheap: a sender that earned a decision should
+    not be re-judged next time. `counts` is (domain, action, label, n) per decision,
+    as a plan records it.
+
+    Only senders that agree with themselves qualify — a sender split 87/32 across two
+    actions is exactly the one a rule must *not* flatten.
+    """
+    per: dict[str, list[tuple[Action, str | None, int]]] = {}
+    for domain, action, label, n in counts:
+        if domain:
+            per.setdefault(domain, []).append((action, label, n))
+
+    rules: list[Rule] = []
+    skipped: list[str] = []
+    for domain, entries in sorted(per.items(), key=lambda kv: -sum(e[2] for e in kv[1])):
+        total = sum(e[2] for e in entries)
+        top_action, top_label, top_n = max(entries, key=lambda e: e[2])
+        if total < min_count or top_n / total < agreement:
+            if total >= min_count:
+                skipped.append(domain)
+            continue
+        if len(rules) >= max_rules:
+            break
+        rules.append(Rule(
+            id=f"auto-from-{domain.replace('.', '-')}",
+            name=f"from {domain} -> {top_action.value}" + (f" '{top_label}'" if top_label else ""),
+            match=[Condition(field="from", op="contains", value=domain)],
+            action=top_action, label=top_label, source="jev",
+            note=f"minted from a plan: {top_n}/{total} of this sender's mail was decided this way",
+        ))
+    why = (f"{len(rules)} sender(s) agreed with themselves on {min_count}+ messages "
+           f"(at least {agreement:.0%} one way)")
+    if skipped:
+        why += f"; {len(skipped)} split between actions, left alone: {', '.join(skipped[:5])}"
+    return rules, why
+
+
 # ---- files ------------------------------------------------------------
 def load_rules(path: Path) -> list[Rule]:
     if not path.is_file():
