@@ -35,6 +35,7 @@ from .plan import (
     digest_plan,
     group_by_index,
     load_messages,
+    plan_from_rules,
     sample_plan,
     undo_run,
 )
@@ -408,6 +409,7 @@ def rules_init(force: bool = typer.Option(False, "--force")) -> None:
 @rules_app.command("plan")
 def rules_plan(
     rule: list[str] = typer.Option(None, "--rule", "-r", help="Which rule(s). Omit for every translatable rule."),
+    rules_path: 'Path | None' = typer.Option(None, "--rules", help="A candidate rules file, instead of the live one."),
     limit: int | None = typer.Option(None, "--limit", "-n", help="Cap the matches per rule."),
     sample: int = typer.Option(10, "--sample", help="Messages to fetch so the plan can be read."),
     json_out: bool = typer.Option(False, "--json"),
@@ -419,7 +421,7 @@ def rules_plan(
     """
     settings = _load()
     gmail = _gmail(settings)
-    rules = _rules(settings, None)
+    rules = _rules(settings, rules_path)
     if rule:
         wanted = set(rule)
         rules = [r for r in rules if r.id in wanted or r.name in wanted]
