@@ -409,9 +409,11 @@ def rules_init(force: bool = typer.Option(False, "--force")) -> None:
 @rules_app.command("plan")
 def rules_plan(
     rule: list[str] = typer.Option(None, "--rule", "-r", help="Which rule(s). Omit for every translatable rule."),
-    rules_path: 'Path | None' = typer.Option(None, "--rules", help="A candidate rules file, instead of the live one."),
+    rules_path: Path | None = typer.Option(None, "--rules", help="A candidate rules file, instead of the live one."),
     limit: int | None = typer.Option(None, "--limit", "-n", help="Cap the matches per rule."),
     sample: int = typer.Option(10, "--sample", help="Messages to fetch so the plan can be read."),
+    all_mail: bool = typer.Option(False, "--all-mail",
+                                  help="Do not scope the rule to the inbox (rarely what you want)."),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """Build a plan from rules Gmail can evaluate itself — no headers, no model.
@@ -430,23 +432,28 @@ def rules_plan(
             raise typer.Exit(1)
     with open_store(settings) as store:
         try:
-            plan = plan_from_rules(store=store, gmail=gmail, rules=rules, limit=limit, sample=sample)
+            plan = plan_from_rules(store=store, gmail=gmail, rules=rules, limit=limit, sample=sample,
+                                   scope="" if all_mail else "in:inbox")
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)
         counts = plan.counts()
-        rows = sample_plan(plan, store, n=max(sample, 1))
+        picked = {i.message_id: i for i in plan.items[:max(sample, 1)]}
+        rows = [(picked[m.id], m) for m in store.get_messages(list(picked))]
 
     if json_out:
         typer.echo(json.dumps({"plan": plan.id, "counts": counts,
-                               "sample": [r.__dict__ for r in rows]}, indent=2, default=str))
+                               "sample": [{"message_id": i.message_id, "action": i.action.value,
+                                           "label": i.label, "rule_id": i.rule_id,
+                                           "subject": m.subject, "from": m.from_addr} for i, m in rows]},
+                              indent=2, default=str))
         return
     typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))  from {plan.query}", bold=True)
     for action, n in sorted(counts.items()):
         typer.echo(f"  {action:<10} {n:,}")
     typer.echo()
-    for row in rows:
-        typer.echo(f"  {row.action:<9} {(row.label or ''):<10} {row.subject[:56]!r} <{row.from_addr}>")
+    for item, m in rows:
+        typer.echo(f"  {item.action.value:<9} {(m.subject or '')[:56]!r} <{m.from_addr}>")
     typer.secho("\nnothing has changed in Gmail. review, then:", dim=True)
     typer.echo(f"  damien plan approve {plan.id}")
     typer.echo(f"  damien plan apply {plan.id} --token <t> --yes")

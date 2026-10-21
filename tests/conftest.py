@@ -14,6 +14,35 @@ from damien.gmail import Gmail
 from damien.store import Store
 
 
+def _matches(message: dict, query: str) -> bool:
+    """Gmail's search semantics, in miniature: every token must hold.
+
+    Good enough that a test can tell `in:inbox label:X` from a bare `label:X` —
+    which is how the fake caught a rule query that had lost its scope.
+    """
+    labels = message.get("labelIds", [])
+    blob = json.dumps(message).lower()
+    for token in (query or "").split():
+        negative = token.startswith("-")
+        word = token[1:] if negative else token
+        field, _, value = word.partition(":")
+        if field == "in":
+            hit = ("INBOX" in labels) if value == "inbox" else (value.upper() in labels)
+        elif field == "label":
+            hit = value in labels or value.lower() in blob
+        elif field == "is":
+            hit = value.upper() in labels
+        elif field in ("older_than", "newer_than"):
+            hit = True                                  # time is not modelled by the fake
+        elif field in ("from", "to", "subject"):
+            hit = value.lower() in blob
+        else:
+            hit = word.lower() in blob
+        if hit == negative:                             # a positive that missed, or a negative that hit
+            return False
+    return True
+
+
 class FakeGmailState:
     """A tiny stand-in for the Gmail REST surface, in one dict."""
 
@@ -66,8 +95,7 @@ class FakeGmailState:
         if path.endswith("/messages"):
             raw_q = request.url.params.get("q", "") or ""
             self.queries.append(raw_q)
-            needle = raw_q.split()[0].split(":")[-1].strip().lower()   # 'in:inbox -in:spam' -> 'inbox'
-            ids = [mid for mid, m in self.messages.items() if not needle or needle in json.dumps(m).lower()]
+            ids = [mid for mid, m in self.messages.items() if _matches(m, raw_q)]
             if int(request.url.params.get("maxResults", "100")) == 1 and self.result_estimate:
                 return httpx.Response(200, json={"messages": [{"id": next(iter(self.messages), "x")}],
                                                  "resultSizeEstimate": self.result_estimate})

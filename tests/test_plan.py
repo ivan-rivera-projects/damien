@@ -365,6 +365,19 @@ def test_a_person_decision_always_passes_the_confidence_floor(store: Store, gmai
 
 
 # ---- a rule pass: no headers, no model ---------------------------------------
+def test_a_rule_query_is_scoped_to_the_inbox(store: Store, gmail, fake):
+    """`older_than:365d` on its own matched Sent and archived mail too: 152,881
+    messages in a mailbox whose inbox holds 107,710."""
+    fake.add("m1", subject="old", labels=["INBOX", "UNREAD"])
+    rules = [Rule(id="r-old", name="old", action=Action.archive,
+                  match=[Condition(field="age_days", op="gt", value=365)])]
+    plan_from_rules(store=store, gmail=gmail, rules=rules, sample=0)
+    assert fake.queries[-1] == "in:inbox older_than:365d -in:spam -in:trash"
+
+    plan_from_rules(store=store, gmail=gmail, rules=rules, sample=0, scope="")
+    assert fake.queries[-1] == "older_than:365d -in:spam -in:trash"
+
+
 def test_plan_from_rules_lists_and_does_not_fetch_everything(store: Store, gmail, fake):
     for i in range(6):
         fake.add(f"m{i}", subject=f"message {i}", labels=["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"])

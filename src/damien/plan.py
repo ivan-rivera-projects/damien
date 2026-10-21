@@ -150,14 +150,23 @@ def digest_plan(plan: Plan, store: Store, *, similarity: float = DEFAULT_SIMILAR
 
 
 def plan_from_rules(*, store: Store, gmail: Gmail, rules: Sequence[Rule], limit: int | None = None,
-                    sample: int = 10) -> Plan:
+                    sample: int = 10, scope: str = "in:inbox") -> Plan:
     """A plan whose decisions Gmail itself can carry out — no headers, no model.
 
     This is how a mailbox of a hundred thousand messages is handled at all: a rule
     that translates to a Gmail query is evaluated *by Gmail*, so the only calls are
-    the listings and the bulk writes. Twenty messages are fetched afterwards, purely
+    the listings and the bulk writes. A few messages are fetched afterwards, purely
     so the plan can be read before it is applied.
+
+    `scope` matters more than it looks. The rules are written against the inbox —
+    "anything over a year old leaves the inbox" — but a translated query on its own
+    has no scope at all: `older_than:365d` alone matched 152,881 messages in a
+    mailbox whose inbox holds 107,710, because it was also matching Sent and
+    archived mail. Every rule query is therefore wrapped in `in:inbox` unless the
+    caller says otherwise, and the plan file does not change that.
     """
+    if scope:
+        rules = [r for r in rules]
     items: dict[str, PlanItem] = {}
     used: list[str] = []
     for rule in rules:
@@ -165,7 +174,8 @@ def plan_from_rules(*, store: Store, gmail: Gmail, rules: Sequence[Rule], limit:
         if query is None or not rule.enabled:
             continue
         used.append(rule.id)
-        for mid in gmail.list_ids(query, limit=limit):
+        scoped = f"{scope} {query}".strip() if scope else query
+        for mid in gmail.list_ids(scoped, limit=limit):
             items.setdefault(mid, PlanItem(message_id=mid, action=rule.action, label=rule.label,
                                            source=Source.rule, rule_id=rule.id))
     plan = store.create_plan(
@@ -173,7 +183,7 @@ def plan_from_rules(*, store: Store, gmail: Gmail, rules: Sequence[Rule], limit:
         items=list(items.values()), judge="rules",
     )
     if sample and items:
-        ids = list(items)[:sample]
+        ids = list(items)[:max(sample, 1)]
         store.upsert_messages(gmail.fetch(ids))
     return plan
 
