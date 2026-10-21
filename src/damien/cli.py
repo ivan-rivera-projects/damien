@@ -602,6 +602,13 @@ def rules_list(json_out: bool = typer.Option(False, "--json")) -> None:
     for r in rows:
         server = r["gmail_query"] or "(runs in Python over listed mail)"
         typer.echo(f"  {r['id']:<22} {r['action']:<9} {server}")
+    from .rules import shadowed
+    clashes = shadowed(rules)
+    if clashes:
+        typer.secho(f"\n{len(clashes)} rule(s) can never fire — a broader one runs first:", fg="yellow")
+        for broad, narrow in clashes:
+            typer.secho(f"  {narrow.id} ({narrow.match[0].value} -> {narrow.action.value}) "
+                        f"is shadowed by {broad.id} ({broad.match[0].value} -> {broad.action.value})", fg="yellow")
 
 
 @app.command()

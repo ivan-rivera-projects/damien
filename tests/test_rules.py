@@ -256,3 +256,17 @@ def test_minting_never_exceeds_its_own_cap():
     counts = [(f"s{i}.example", Action.trash, None, 9) for i in range(30)]
     rules, _ = mint_rules_by_sender(counts, min_count=5, max_rules=10)
     assert len(rules) == 10
+
+
+def test_a_broader_rule_that_runs_first_can_shadow_a_narrower_one():
+    """The Alibaba shape: one domain rule where a per-address distinction was needed."""
+    from damien.rules import shadowed
+    broad = Rule(id="b", name="b", action=Action.keep,
+                 match=[Condition(field="from", op="contains", value="notice.alibaba.com")])
+    narrow = Rule(id="n", name="n", action=Action.trash,
+                  match=[Condition(field="from", op="contains", value="sales@notice.alibaba.com")])
+    assert shadowed([broad, narrow]) == [(broad, narrow)]
+    assert shadowed([narrow, broad]) == []          # specific first: correct, not shadowed
+    same_action = Rule(id="s", name="s", action=Action.keep,
+                       match=[Condition(field="from", op="contains", value="sales@notice.alibaba.com")])
+    assert shadowed([broad, same_action]) == []      # agreeing is harmless

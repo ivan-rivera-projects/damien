@@ -260,6 +260,27 @@ def mint_rules(messages: Iterable[Message], action: Action, label: str | None, *
                 f"— apply the group, or name the senders you want a rule for")
 
 
+def shadowed(rules: Iterable[Rule]) -> list[tuple[Rule, Rule]]:
+    """Pairs where a broader sender rule runs first and disagrees with a narrower one.
+
+    `from amazon.com -> keep` placed before `from business.amazon.com -> trash` makes
+    the second rule dead code, silently, forever. Minting rules by sender produced
+    exactly this shape for Alibaba: one domain rule (wrong on its own terms) sitting
+    where a per-address distinction was needed. A rule file is read as an ordered list,
+    so the check has to understand order, not just membership.
+    """
+    ordered = list(rules)
+    sender = [(i, r) for i, r in enumerate(ordered)
+              if r.enabled and r.match and r.match[0].field == "from" and r.match[0].op == "contains"]
+    out: list[tuple[Rule, Rule]] = []
+    for pos, (i, broad) in enumerate(sender):
+        for j, narrow in sender[pos + 1:]:
+            b, n = str(broad.match[0].value).lower(), str(narrow.match[0].value).lower()
+            if b != n and n.endswith(b) and broad.action is not narrow.action:
+                out.append((broad, narrow))
+    return out
+
+
 def mint_rules_by_sender(counts: Iterable[tuple[str, Action, str | None, int]], *,
                          min_count: int = 5, agreement: float = 0.9,
                          max_rules: int = 80) -> tuple[list[Rule], str]:
