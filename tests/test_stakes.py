@@ -149,3 +149,29 @@ def test_a_rule_may_not_contradict_a_correction_from_the_same_sender():
         conflicts = [r for r in rows
                      if (r["from_addr"] or "").split("@")[-1] in domains and r["action"] != Action.archive.value]
         assert len(conflicts) == 1                       # so `rules from-group` would refuse
+
+
+# ---- read and Gmail-important: mail he engaged with does not leave the inbox ---
+def test_mail_the_person_read_is_not_filed_away():
+    read = a_message("production", from_addr="supplier@fashion.example", label_ids=["INBOX"])
+    assert stake_floor(read, action=Action.trash) is not None
+    assert stake_floor(read, action=Action.archive) is not None
+    assert stake_floor(read, action=Action.label) is None        # filing it under a name is not losing it
+    unread = a_message("production", label_ids=["INBOX", "UNREAD"])
+    assert stake_floor(unread, action=Action.trash) is None
+
+
+def test_gmail_important_protects_from_trash_and_archive_only():
+    flagged = a_message("Weekly roundup", label_ids=["INBOX", "UNREAD", "IMPORTANT"])
+    assert stake_floor(flagged, action=Action.trash) is not None
+    assert stake_floor(flagged, action=Action.archive) is not None
+    assert stake_floor(flagged, action=Action.label) is None
+
+
+def test_a_read_marketing_blast_the_model_would_trash_is_held():
+    """The one false keep this costs: a Shopify-app blast Gmail called important."""
+    m = a_message("FREE LIMITED-EDITION TEE!", label_ids=["INBOX", "UNREAD", "IMPORTANT"],
+                  from_addr="no-reply@marsello.com")
+    decision = decide_message(m, rules=(), spec=DEFAULT_SPEC, verdict=verdict("promotion", machine_sent=0.99))
+    assert decision.action is Action.keep
+    assert "important" in decision.rationale.lower()

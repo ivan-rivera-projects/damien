@@ -243,3 +243,14 @@ def test_a_changed_message_is_judged_again(settings, tmp_path):
         assert calls["n"] == 2                       # the state changed, so it was bought again
     finally:
         store.close()
+
+
+def test_the_spec_names_the_persons_world_and_policy():
+    spec = DEFAULT_SPEC
+    text = spec.context.lower()
+    for word in ("streetwear", "fashion", "music"):
+        assert word in text, word
+    keep = next(b for b in spec.buckets if b.key == "keep")
+    assert "fashion" in keep.description.lower()
+    promo = next(b for b in spec.buckets if b.key == "promotion")
+    assert "brand he follows" in promo.description.lower()       # a brand he follows is never a promo

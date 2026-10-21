@@ -75,15 +75,26 @@ class JudgementSpec:
 
 
 DEFAULT_SPEC = JudgementSpec(
-    context="A producer/manager's personal Gmail inbox. Mail to keep is real: clients, collaborators, "
-            "money, contracts, bookings, people writing in person.",
+    context=(
+        "A music producer and manager's personal Gmail inbox. He runs a streetwear label "
+        "(Little Giants). Mail that belongs in the inbox: clients, collaborators, money, "
+        "contracts, bookings, and anything written by a person. He keeps — and reads — "
+        "fashion and streetwear: drops, lookbooks and announcements from brands he follows, "
+        "and fashion production (materials, manufacturers, samples, suppliers, wholesale). "
+        "He keeps music-industry mail: artists, labels, publishers, studios, engineers, "
+        "splits, masters, releases, invoices for work. A promotional email from a clothing "
+        "or music brand is still mail he wants; a discount blast from a retailer he does not "
+        "deal with is not."
+    ),
     buckets=(
-        Bucket("keep", "Belongs in the inbox and needs attention, or is from a real person", Action.keep),
+        Bucket("keep", "Belongs in the inbox: written by a person, needs attention, or is fashion, "
+                       "streetwear or music-industry mail he follows", Action.keep),
         Bucket("receipt", "An automated receipt, order or confirmation for something already done",
                Action.label, "Receipts"),
-        Bucket("newsletter", "A newsletter, digest or mailing-list post the person subscribed to",
-               Action.label, "Newsletters"),
-        Bucket("promotion", "Marketing, sales, deals or advertising from a company", Action.trash),
+        Bucket("newsletter", "A newsletter, digest or mailing-list post he subscribed to, including a "
+                             "fashion or music one (file it, do not trash it)", Action.label, "Newsletters"),
+        Bucket("promotion", "A discount, sale or advertising blast from a retailer or service he "
+                            "does not deal with — never a clothing or music brand he follows", Action.trash),
         Bucket("notification", "Automated notification (social, app, security, shipping) with nothing to do",
                Action.archive),
         Bucket("archive", "Once-useful, now done: keep the message, get it out of the way",
@@ -136,7 +147,7 @@ def decide_message(
     if decision.action is not Action.keep:
         signals = verdict.signals or {}
         held = stake_floor(message, machine_sent=signals.get("handled_by_a_machine"),
-                           importance=signals.get("importance"),
+                           importance=signals.get("importance"), action=decision.action,
                            protected=protected_label(message, label_names, protected_labels))
         if held:
             return decision.model_copy(update={

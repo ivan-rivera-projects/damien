@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from .models import Message
+from .models import Action, Message
 
 # Money, deadlines, account and legal trouble: if the subject names one of these,
 # a model's archive/trash is not allowed to stand. Erring towards `keep` costs an
@@ -61,7 +61,7 @@ def _is_a_reply(message: Message) -> bool:
 
 
 def stake_floor(message: Message, *, machine_sent: float | None = None, importance: float | None = None,
-                protected: str | None = None) -> str | None:
+                protected: str | None = None, action: Action | None = None) -> str | None:
     """Why a model must not archive or trash this message, or None.
 
     Two of the three signals are evidence the request already paid for — the model's
@@ -77,6 +77,17 @@ def stake_floor(message: Message, *, machine_sent: float | None = None, importan
         return f"the person labelled it {protected!r} themselves"
     if CONSEQUENTIAL.search(message.subject or ""):
         return "the subject names money, a deadline or an account problem"
+    # Mail the person has *opened* is mail they follow — 16 of 16 in a real inbox,
+    # none of which should have been filed away. Gmail's own per-user IMPORTANT is
+    # the same idea, one step weaker (33 of 34).
+    #
+    # These two protect against mail *leaving the inbox* (trash, archive); they do
+    # not block a label, because filing something under a name is not losing it.
+    if action in (Action.trash, Action.archive):
+        if "UNREAD" not in message.label_ids:
+            return "the person has already read it"
+        if "IMPORTANT" in message.label_ids:
+            return "Gmail marks it important for this person"
     if _not_a_bulk_sender(message):
         if _is_a_reply(message):
             return "it is a reply, from someone who is not a bulk sender"

@@ -24,12 +24,12 @@ from damien.store import Store
 def messages() -> list[Message]:
     return [
         Message(id="m1", account="me@example.com", subject="Big SALE 50% off", snippet="deals",
-                from_addr="deals@shop.example", label_ids=["INBOX"], internal_date=1_700_000_000_000),
+                from_addr="deals@shop.example", label_ids=["INBOX", "UNREAD"], internal_date=1_700_000_000_000),
         Message(id="m2", account="me@example.com", subject="Weekly digest", snippet="news",
-                from_addr="news@list.example", label_ids=["INBOX"], list_unsubscribe=True,
+                from_addr="news@list.example", label_ids=["INBOX", "UNREAD"], list_unsubscribe=True,
                 internal_date=1_700_000_000_000),
         Message(id="m3", account="me@example.com", subject="can we talk Tuesday?", snippet="about the split",
-                from_addr="alex@studio.example", label_ids=["INBOX"], internal_date=1_700_000_000_000),
+                from_addr="alex@studio.example", label_ids=["INBOX", "UNREAD"], internal_date=1_700_000_000_000),
     ]
 
 
