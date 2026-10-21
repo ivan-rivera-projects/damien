@@ -317,6 +317,7 @@ def correct(
     with open_store(settings) as store:
         store.correct(message_id, parsed, label=label, note=note)
     typer.secho(f"recorded correction for {message_id}: {parsed.value}", fg="green")
+    typer.secho("it outranks a rule or a model on every later plan", dim=True)
 
 
 def main() -> None:

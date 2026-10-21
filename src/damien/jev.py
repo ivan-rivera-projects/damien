@@ -57,7 +57,7 @@ def message_state(message: Message, context: str = "") -> dict[str, Any]:
             "snippet": (message.snippet or "")[:600],
             "labels": list(message.label_ids),
             "has_attachment": message.has_attachment,
-            "is_mailing_list": message.list_unsubscribe,
+            "is_mailing_list": bool(message.list_id or message.list_unsubscribe),
         }
     }
     if context:
@@ -113,7 +113,7 @@ def parse_answer(message_id: str, answers: dict[str, Any]) -> Verdict:
 
     return Verdict(
         message_id=message_id, choice=choice, confidence=confidence, probabilities=probabilities,
-        rationale="; ".join(notes) or None,
+        signals={**nouls, "importance": score}, rationale="; ".join(notes) or None,
     )
 
 

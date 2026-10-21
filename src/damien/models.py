@@ -49,6 +49,7 @@ class Message(BaseModel):
     label_ids: list[str] = Field(default_factory=list)
     has_attachment: bool = False
     list_unsubscribe: bool = False
+    list_id: str | None = None
     size_estimate: int | None = None
 
     def age_days(self, at: datetime | None = None) -> float | None:

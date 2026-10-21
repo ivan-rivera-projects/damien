@@ -29,7 +29,7 @@ from .models import Message
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
-HEADERS = ("From", "To", "Subject", "Date", "List-Unsubscribe")
+HEADERS = ("From", "To", "Subject", "Date", "List-Unsubscribe", "List-Id")
 
 
 class GmailError(RuntimeError):
@@ -181,6 +181,7 @@ class Gmail:
                 label_ids=list(data.get("labelIds") or []),
                 has_attachment=any(p.get("filename") for p in parts),
                 list_unsubscribe="list-unsubscribe" in hdrs,
+                list_id=hdrs.get("list-id"),
                 size_estimate=data.get("sizeEstimate"),
             ))
         return out

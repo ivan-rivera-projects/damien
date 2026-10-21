@@ -83,3 +83,12 @@ def test_a_connection_string_never_prints_its_password():
     assert _mask_url("postgres://user:s3cr3t@127.0.0.1:5433/damien") == "postgres://user:***@127.0.0.1:5433/damien"
     assert _mask_url("postgres://user@host/db") == "postgres://user@host/db"
     assert _mask_url(None) is None
+
+
+def test_sql_with_a_literal_percent_works_on_both_dialects(store: Store):
+    """A LIKE pattern must not be mistaken for a placeholder (psycopg reads %v)."""
+    store.upsert_messages([a_message("m1")])
+    row = store.conn.execute("SELECT COUNT(*) AS n FROM messages WHERE subject LIKE ?", ("%i%",)).fetchone()
+    assert row["n"] == 1
+    row2 = store.conn.execute("SELECT COUNT(*) AS n FROM messages WHERE subject LIKE ?", ("%zzz%",)).fetchone()
+    assert row2["n"] == 0

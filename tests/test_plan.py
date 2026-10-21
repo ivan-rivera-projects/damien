@@ -135,3 +135,16 @@ def test_a_keep_only_plan_writes_nothing(store: Store, gmail, fake):
     token = approve(store, plan.id)
     run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
     assert run.applied == 0 and fake.mods == []
+
+
+def test_a_person_correction_outranks_the_judge_on_the_next_plan(store: Store):
+    first = build(store, judge=FakeJudge())
+    assert next(i for i in first.items if i.message_id == "m1").action is Action.trash
+
+    store.correct("m1", Action.keep, note="that was a client")
+
+    second = build(store, judge=FakeJudge())
+    item = next(i for i in second.items if i.message_id == "m1")
+    assert item.action is Action.keep
+    assert item.source is Source.person            # the person is named as the decider
+    assert item.rule_id is None

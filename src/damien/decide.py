@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from .models import Action, Decision, Message, Source
 from .rules import Rule, first_match
+from .stakes import stake_floor
 
 
 class Verdict(BaseModel):
@@ -31,6 +32,7 @@ class Verdict(BaseModel):
     choice: str                       # the bucket key the judge picked
     confidence: float | None = None
     probabilities: dict[str, float] | None = None
+    signals: dict[str, float | None] | None = None   # the Noul/Score answers, kept raw
     rationale: str | None = None
 
 
@@ -122,11 +124,22 @@ def decide_message(
     if bucket is None:
         return Decision(message_id=message.id, action=Action.keep, source=Source.default,
                         rationale=f"judge returned an unknown bucket ({verdict.choice!r})")
-    return Decision(
+    decision = Decision(
         message_id=message.id, action=bucket.action, label=bucket.label, source=Source.jev,
         rationale=verdict.rationale or bucket.description, confidence=verdict.confidence,
         probabilities=verdict.probabilities, model=model,
     )
+    # The guardrail: the model may not quietly file away money, deadlines or a person.
+    if decision.action is not Action.keep:
+        signals = verdict.signals or {}
+        held = stake_floor(message, machine_sent=signals.get("handled_by_a_machine"),
+                           importance=signals.get("importance"))
+        if held:
+            return decision.model_copy(update={
+                "action": Action.keep, "label": None,
+                "rationale": f"held for a person — {held} — {decision.rationale or ''}".strip(),
+            })
+    return decision
 
 
 def decide_all(
@@ -183,6 +196,29 @@ def enforce_confidence(decisions: Sequence[Decision], *, ask_below: float) -> li
             }))
         else:
             out.append(d)
+    return out
+
+
+def apply_corrections(decisions: Sequence[Decision], corrections: dict[str, dict]) -> list[Decision]:
+    """What a person decided outranks a rule and outranks the model, on every later plan.
+
+    This is what makes `damien correct` a memory rather than a note: the record is
+    append-only, so the model's original judgment stays in history beside it.
+    """
+    if not corrections:
+        return list(decisions)
+    out: list[Decision] = []
+    for d in decisions:
+        fixed = corrections.get(d.message_id)
+        if fixed is None:
+            out.append(d)
+            continue
+        note = f" — {fixed['note']}" if fixed.get("note") else ""
+        out.append(d.model_copy(update={
+            "action": Action(fixed["action"]), "label": fixed.get("label"), "source": Source.person,
+            "rule_id": None, "confidence": 1.0,
+            "rationale": f"a person decided this ({fixed['at']}){note}",
+        }))
     return out
 
 

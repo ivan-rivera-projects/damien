@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 from .models import (
     Action,
@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS messages (
   label_ids TEXT NOT NULL DEFAULT '[]',
   has_attachment INTEGER NOT NULL DEFAULT 0,
   list_unsubscribe INTEGER NOT NULL DEFAULT 0,
+  list_id TEXT,
   size_estimate INTEGER,
   seen_at TEXT NOT NULL
 );
@@ -138,6 +139,7 @@ CREATE TABLE IF NOT EXISTS messages (
   label_ids TEXT NOT NULL DEFAULT '[]',
   has_attachment INTEGER NOT NULL DEFAULT 0,
   list_unsubscribe INTEGER NOT NULL DEFAULT 0,
+  list_id TEXT,
   size_estimate INTEGER,
   seen_at TEXT NOT NULL
 );
@@ -261,7 +263,9 @@ class _PgConn:
 
     @staticmethod
     def _q(sql: str) -> str:
-        return sql.replace("?", "%s")
+        # psycopg reads % in SQL as a placeholder, so a literal one (e.g. LIKE '%x%')
+        # must be doubled. Escape first, then insert our own %s.
+        return sql.replace("%", "%%").replace("?", "%s")
 
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         return self.raw.execute(self._q(sql), tuple(params or ()))
@@ -284,11 +288,31 @@ class _PgConn:
 class Store:
     """Everything a run needs to be auditable, resumable and reversible."""
 
+    # Columns added after the first release. CREATE TABLE IF NOT EXISTS cannot add a
+    # column to an existing table, and this tool must survive its own schema changes.
+    ADDED_COLUMNS: ClassVar[dict[str, dict[str, str]]] = {"messages": {"list_id": "TEXT"}}
+
     def __init__(self, target: Path | str):
         self.target = str(target)
         self.conn: _SqliteConn | _PgConn = _PgConn(self.target) if is_url(target) else _SqliteConn(Path(target))
         self.dialect = self.conn.dialect
         self.conn.script(SCHEMA_PG if self.dialect == "postgres" else SCHEMA_SQLITE)
+        self._migrate()
+        self.conn.commit()
+
+    def _columns(self, table: str) -> set[str]:
+        if self.dialect == "postgres":
+            rows = self.conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = ?", (table,))
+            return {r["column_name"] for r in rows}
+        return {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate(self) -> None:
+        for table, columns in self.ADDED_COLUMNS.items():
+            have = self._columns(table)
+            for name, sql_type in columns.items():
+                if name not in have:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
         self.conn.commit()
 
     def close(self) -> None:
@@ -313,19 +337,20 @@ class Store:
             (
                 m.id, m.account, m.thread_id, m.internal_date, m.from_addr, m.from_name, m.to,
                 m.subject, m.snippet, json.dumps(m.label_ids), int(m.has_attachment),
-                int(m.list_unsubscribe), m.size_estimate, stamp,
+                int(m.list_unsubscribe), m.list_id, m.size_estimate, stamp,
             )
             for m in messages
         ]
         self.conn.executemany(
             """INSERT INTO messages (id, account, thread_id, internal_date, from_addr, from_name, to_addr,
-                                     subject, snippet, label_ids, has_attachment, list_unsubscribe, size_estimate, seen_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                     subject, snippet, label_ids, has_attachment, list_unsubscribe, list_id, size_estimate, seen_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                  thread_id=EXCLUDED.thread_id, internal_date=EXCLUDED.internal_date, from_addr=EXCLUDED.from_addr,
                  from_name=EXCLUDED.from_name, to_addr=EXCLUDED.to_addr, subject=EXCLUDED.subject,
                  snippet=EXCLUDED.snippet, label_ids=EXCLUDED.label_ids, has_attachment=EXCLUDED.has_attachment,
-                 list_unsubscribe=EXCLUDED.list_unsubscribe, size_estimate=EXCLUDED.size_estimate,
+                 list_unsubscribe=EXCLUDED.list_unsubscribe, list_id=EXCLUDED.list_id,
+                 size_estimate=EXCLUDED.size_estimate,
                  seen_at=EXCLUDED.seen_at""",
             rows,
         )
@@ -508,5 +533,5 @@ def _message(row: Any) -> Message:
         from_addr=row["from_addr"], from_name=row["from_name"], to=row["to_addr"], subject=row["subject"],
         snippet=row["snippet"], label_ids=json.loads(row["label_ids"]),
         has_attachment=bool(row["has_attachment"]), list_unsubscribe=bool(row["list_unsubscribe"]),
-        size_estimate=row["size_estimate"],
+        list_id=row["list_id"], size_estimate=row["size_estimate"],
     )

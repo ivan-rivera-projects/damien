@@ -85,3 +85,51 @@ def test_default_rules_are_all_translatable_or_explicitly_not():
     for rule in default_rules():
         # Every default rule is safe by construction: never a permanent delete.
         assert rule.action.value in ("archive", "trash", "label", "keep", "mark_read")
+
+
+def test_words_operator_does_not_match_inside_a_longer_word():
+    """'sale' must not match 'wholesale' — and 'tax' must not match 'syntax'.
+
+    (My first version of this test claimed 'order' was inside 'openrouter'. It is
+    not: o-p-e-n-r-o-u-t-e-r has no 'd'. The operator is still right for short
+    tokens — 'sale' inside 'wholesale', 'tax' inside 'syntax'.)
+    """
+    cond = Condition(field="subject", op="words", value="sale")
+    matches_rule = Rule(id="r", name="r", action=Action.archive, match=[cond])
+    assert matches(matches_rule, msg(subject="Wholesale pricing update")) is False
+    assert matches(matches_rule, msg(subject="Big SALE 50% off")) is True
+    loose = Condition(field="subject", op="contains", value="sale")
+    assert matches(Rule(id="r", name="r", action=Action.archive, match=[loose]),
+                   msg(subject="Wholesale pricing update")) is True
+
+
+def test_words_matches_a_phrase_and_a_hyphen_breaks_it():
+    cond = Condition(field="subject", op="words", value="past due")
+    rule = Rule(id="r", name="r", action=Action.archive, match=[cond])
+    assert matches(rule, msg(subject="Past due: your subscription")) is True
+    assert matches(rule, msg(subject="The past-due date")) is False      # a hyphen is not a word break here
+
+
+def test_words_translates_to_a_gmail_query():
+    from damien.rules import to_query
+    assert to_query(Rule(id="w", name="w", action=Action.archive,
+                         match=[Condition(field="subject", op="words", value="past due")])) == 'subject:"past due"'
+
+
+def test_list_id_is_a_field_rules_can_use():
+    on_list = msg(list_id="Studio List <studio.list.example>")
+    assert matches(Rule(id="r", name="r", action=Action.archive,
+                        match=[Condition(field="list_id", op="exists")]), on_list) is True
+    assert matches(Rule(id="r", name="r", action=Action.archive,
+                        match=[Condition(field="list_id", op="contains", value="list.example")]), on_list) is True
+    assert matches(Rule(id="r", name="r", action=Action.archive,
+                        match=[Condition(field="list_id", op="exists")]), msg()) is False
+
+
+def test_the_default_rules_no_longer_blanket_label_every_mailing_list():
+    from damien.rules import default_rules
+    ids = {r.id for r in default_rules()}
+    assert "r-newsletters" not in ids, "the rule that swallowed 149 of 200 must be gone"
+    for rule in default_rules():
+        fields = {c.field for c in rule.match} | {c.field for group in rule.any_of for c in group}
+        assert "list_unsubscribe" not in fields or rule.action is Action.keep

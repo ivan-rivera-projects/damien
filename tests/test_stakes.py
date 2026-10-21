@@ -1,0 +1,108 @@
+"""The stake guardrail — the floor that stopped three real archives in a real inbox."""
+
+from __future__ import annotations
+
+from damien.decide import DEFAULT_SPEC, Verdict, decide_message
+from damien.models import Action, Message, Source
+from damien.rules import Condition, Rule
+from damien.stakes import stake_floor
+
+
+def a_message(subject: str, **kw) -> Message:
+    base = {"id": "m1", "account": "me@example.com", "subject": subject, "snippet": "", "from_addr": "a@b.example",
+            "label_ids": ["INBOX"], "internal_date": 1_700_000_000_000}
+    base.update(kw)
+    return Message(**base)
+
+
+def verdict(choice: str, *, machine_sent: float | None = None, confidence: float = 0.95) -> Verdict:
+    return Verdict(message_id="m1", choice=choice, confidence=confidence, probabilities={choice: confidence},
+                   signals={"handled_by_a_machine": machine_sent})
+
+
+# ---- the subjects that actually failed on the real run ----------------------
+def test_the_three_real_misses_are_now_held():
+    for subject in ("Ivan, your domains will expire in 30 days - renew now",
+                    "Your account may have insufficient funds",
+                    "A bill payment failed for Little Giants"):
+        assert stake_floor(a_message(subject)) is not None, subject
+
+
+def test_money_deadlines_accounts_and_legal_are_all_held():
+    for subject in ("Invoice 4471 from Acme", "Past due: your subscription",
+                    "Your card was declined", "Security alert: new sign-in",
+                    "Action required: verify your account", "Contract renewal notice",
+                    "Your verification code", "IRS notice"):
+        assert stake_floor(a_message(subject)) is not None, subject
+
+
+def test_ordinary_mail_is_not_floored():
+    for subject in ("Weekly digest: 3 new articles", "Big SALE 50% off",
+                    "You have 1 new invitation", "TBPN", "New customer message"):
+        assert stake_floor(a_message(subject)) is None, subject
+
+
+def test_a_person_is_held_and_machinery_is_not():
+    human = a_message("Questions about the split", from_addr="viviantang@pinterest.com")
+    assert stake_floor(human, machine_sent=0.05) is not None
+    # the model's own reading says a machine sent it, and nothing else says otherwise
+    assert stake_floor(human, machine_sent=0.7) is None
+    # a robot address is never treated as a person, however low the probability
+    robot = a_message("hello", from_addr="noreply@shop.example")
+    assert stake_floor(robot, machine_sent=0.02) is None
+    # a mailing list is not a person either
+    listed = a_message("hello", from_addr="news@list.example", list_id="List <x.list.example>")
+    assert stake_floor(listed, machine_sent=0.02) is None
+
+
+# ---- and how it behaves inside a decision ------------------------------------
+def test_a_confident_model_archive_is_held_and_the_reason_is_kept():
+    decision = decide_message(a_message("Your domains will expire in 30 days"), rules=(), spec=DEFAULT_SPEC,
+                              verdict=verdict("notification", machine_sent=0.97))
+    assert decision.action is Action.keep
+    assert decision.source is Source.jev                       # still the model's judgment, recorded
+    assert "held for a person" in decision.rationale
+    assert "notification" in (decision.probabilities or {})   # what it wanted is still visible
+
+
+def test_a_person_wins_the_model_floors():
+    decision = decide_message(a_message("Your domains will expire"), rules=(), spec=DEFAULT_SPEC,
+                              verdict=verdict("keep"))
+    assert decision.action is Action.keep
+
+
+def test_a_rule_is_never_second_guessed_by_the_guardrail():
+    # a person's own rule says trash; the guardrail exists to catch models, not people
+    rule = Rule(id="r1", name="trash it", action=Action.trash,
+                match=[Condition(field="subject", op="words", value="expire")])
+    decision = decide_message(a_message("Your domains will expire"), rules=[rule], spec=DEFAULT_SPEC, verdict=None)
+    assert decision.action is Action.trash
+    assert decision.source is Source.rule
+
+
+def test_nothing_held_is_ever_made_worse():
+    """The floor only raises to keep — it never turns keep into trash."""
+    decision = decide_message(a_message("Weekly digest"), rules=(), spec=DEFAULT_SPEC,
+                              verdict=verdict("keep", machine_sent=0.9))
+    assert decision.action is Action.keep
+
+
+# ---- the exact message that survived the first guardrail ---------------------
+def test_the_real_pinterest_reply_is_now_held():
+    """importance 2.2/3 and machine-sent 0.34: two signals the first version ignored."""
+    m = a_message("Re: wearelittlegs + Pinterest", from_addr="viviantang@pinterest.com")
+    assert stake_floor(m, machine_sent=0.34, importance=2.20) is not None
+    # each signal alone is enough
+    assert stake_floor(m, machine_sent=0.34) is not None          # a reply, not a bulk sender
+    assert stake_floor(m, machine_sent=0.9, importance=2.20) is not None
+
+
+def test_a_reply_from_a_bulk_sender_is_not_treated_as_a_person():
+    m = a_message("Re: your order", from_addr="news@list.example", list_id="List <x.example>")
+    assert stake_floor(m, machine_sent=0.05, importance=0.4) is None
+
+
+def test_importance_alone_holds_anything_the_model_valued():
+    m = a_message("Low stock alerts at the store")
+    assert stake_floor(m, machine_sent=0.99, importance=2.4) is not None
+    assert stake_floor(m, machine_sent=0.99, importance=1.2) is None
