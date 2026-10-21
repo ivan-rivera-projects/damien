@@ -24,10 +24,19 @@ import typer
 from . import __version__
 from .config import Settings, load_settings
 from .decide import DEFAULT_SPEC
+from .embed import DEFAULT_SIMILARITY
 from .gmail import Gmail, GmailError
 from .jev import FakeJudge, make_judge
 from .models import Action
-from .plan import apply_plan, approve, build_plan, load_messages, sample_plan, undo_run
+from .plan import (
+    apply_plan,
+    approve,
+    build_plan,
+    digest_plan,
+    load_messages,
+    sample_plan,
+    undo_run,
+)
 from .rules import default_rules, load_rules, save_rules
 from .store import VerdictCache, open_store
 
@@ -185,6 +194,47 @@ def plan_build(
     typer.echo()
     typer.secho("nothing has changed in Gmail. review, then:", dim=True)
     typer.echo(f"  damien plan approve {plan.id}")
+
+
+@plan_app.command("digest")
+def plan_digest(
+    plan_id: str,
+    similarity: float = typer.Option(DEFAULT_SIMILARITY, "--similarity",
+                                     help="How alike two messages must be to share a group."),
+    embed_missing: bool = typer.Option(True, "--embed/--no-embed", help="Embed messages that have no vector yet."),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """Collapse a plan into review groups — one decision per group, not per message."""
+    settings = _load()
+    with open_store(settings) as store:
+        plan = store.get_plan(plan_id)
+        if plan is None:
+            typer.secho(f"no such plan: {plan_id}", fg="red")
+            raise typer.Exit(1)
+        embedder = None
+        if embed_missing and store.missing_embeddings([i.message_id for i in plan.items]):
+            from .embed import Embedder
+            try:
+                embedder = Embedder()
+            except ImportError:
+                typer.secho("(fastembed is not installed — grouping on what is already embedded)", dim=True)
+        groups = digest_plan(plan, store, similarity=similarity, embedder=embedder)
+
+    if json_out:
+        typer.echo(json.dumps({"plan": plan.id, "messages": len(plan.items),
+                               "groups": [g.__dict__ for g in groups]}, indent=2))
+        return
+
+    typer.secho(f"plan {plan.id} — {len(plan.items)} message(s) in {len(groups)} group(s)", bold=True)
+    current = None
+    for group in groups:
+        if group.action != current:
+            current = group.action
+            typer.secho(f"\n{current}", bold=True)
+        where = f"{group.label} · " if group.label else ""
+        typer.echo(f"  ▸ {len(group.message_ids):>4}  {where}{group.domains}")
+        typer.echo(f"          e.g. {group.sample_subject[:70]!r}")
+    typer.secho(f"\n{len(plan.items)} message(s) → {len(groups)} decision(s)", dim=True)
 
 
 @plan_app.command("show")

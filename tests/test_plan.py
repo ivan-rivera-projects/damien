@@ -11,6 +11,7 @@ from damien.plan import (
     apply_plan,
     approve,
     build_plan,
+    digest_plan,
     load_messages,
     sample_plan,
     undo_run,
@@ -248,3 +249,57 @@ def test_sampling_a_plan_that_mixes_labelled_and_unlabelled_items(store: Store):
                            for i in (1, 2, 3)])
     rows = sample_plan(plan, store, n=10)
     assert {r.action for r in rows} == {"trash", "label", "keep"}
+
+
+# ---- the digest: collapsing a plan into review groups ------------------------
+def test_similar_messages_collapse_into_one_group(store: Store):
+    store.upsert_messages([
+        Message(id="m1", account="a", subject="Ugg Classic Slipper only $99.96", from_addr="dsw@e.dsw.com"),
+        Message(id="m2", account="a", subject="These Ugg slippers are just $99.96", from_addr="dsw@e.dsw.com"),
+        Message(id="m3", account="a", subject="Your receipt from OpenRouter", from_addr="invoice@openrouter.ai"),
+        Message(id="m4", account="a", subject="Your receipt from OpenCode", from_addr="receipts@anoma.ly"),
+    ])
+    # m1/m2 are near-identical promos; m3/m4 are near-identical receipts
+    store.put_embeddings([("m1", "t", [1.0, 0.0, 0.0]), ("m2", "t", [0.99, 0.02, 0.0]),
+                          ("m3", "t", [0.0, 1.0, 0.0]), ("m4", "t", [0.0, 0.99, 0.02])], "t")
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id="m1", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m2", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m3", action=Action.label, label="Receipts", source=Source.jev),
+        PlanItem(message_id="m4", action=Action.label, label="Receipts", source=Source.jev),
+    ])
+    groups = digest_plan(plan, store, similarity=0.9)
+    assert len(groups) == 2                                     # not 4: two kinds of message
+    trashes = [g for g in groups if g.action == "trash"]
+    assert len(trashes) == 1 and len(trashes[0].message_ids) == 2
+    assert "dsw.com" in trashes[0].domains
+    receipts = [g for g in groups if g.action == "label"][0]
+    assert receipts.label == "Receipts" and len(receipts.message_ids) == 2
+
+
+def test_a_dissimilar_message_keeps_its_own_group(store: Store):
+    store.upsert_messages([
+        Message(id="m1", account="a", subject="promo one", from_addr="a@x.com"),
+        Message(id="m2", account="a", subject="something else", from_addr="b@y.com"),
+    ])
+    store.put_embeddings([("m1", "t", [1.0, 0.0]), ("m2", "t", [0.0, 1.0])], "t")
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id="m1", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m2", action=Action.trash, source=Source.jev),
+    ])
+    assert len(digest_plan(plan, store, similarity=0.8)) == 2
+
+
+def test_the_digest_never_mixes_actions_or_labels(store: Store):
+    store.upsert_messages([
+        Message(id="m1", account="a", subject="identical", from_addr="a@x.com"),
+        Message(id="m2", account="a", subject="identical", from_addr="a@x.com"),
+    ])
+    store.put_embeddings([("m1", "t", [1.0, 0.0]), ("m2", "t", [1.0, 0.0])], "t")
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id="m1", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m2", action=Action.keep, source=Source.jev),
+    ])
+    groups = digest_plan(plan, store, similarity=0.9)
+    assert len(groups) == 2                       # identical text, different answers: never merged
+    assert {g.action for g in groups} == {"trash", "keep"}

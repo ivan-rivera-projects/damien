@@ -31,7 +31,7 @@ from .models import (
     now,
 )
 
-TABLES = ("corrections", "verdicts", "run_batches", "runs", "plan_items", "plans", "decisions", "messages")
+TABLES = ("corrections", "verdicts", "message_embeddings", "run_batches", "runs", "plan_items", "plans", "decisions", "messages")
 
 SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -122,6 +122,13 @@ CREATE TABLE IF NOT EXISTS verdicts (
   probabilities TEXT,
   signals TEXT,
   rationale TEXT,
+  at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS message_embeddings (
+  message_id TEXT PRIMARY KEY,
+  model TEXT,
+  vec TEXT NOT NULL,
   at TEXT NOT NULL
 );
 
@@ -229,6 +236,13 @@ CREATE TABLE IF NOT EXISTS verdicts (
   at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS message_embeddings (
+  message_id TEXT PRIMARY KEY,
+  model TEXT,
+  vec TEXT NOT NULL,
+  at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS corrections (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   message_id TEXT NOT NULL,
@@ -270,6 +284,9 @@ class _SqliteConn:
     def commit(self) -> None:
         self.raw.commit()
 
+    def rollback(self) -> None:
+        self.raw.rollback()
+
     def close(self) -> None:
         self.raw.close()
 
@@ -305,6 +322,9 @@ class _PgConn:
     def commit(self) -> None:
         self.raw.commit()
 
+    def rollback(self) -> None:
+        self.raw.rollback()
+
     def close(self) -> None:
         self.raw.close()
 
@@ -320,6 +340,7 @@ class Store:
         self.target = str(target)
         self.conn: _SqliteConn | _PgConn = _PgConn(self.target) if is_url(target) else _SqliteConn(Path(target))
         self.dialect = self.conn.dialect
+        self._pgvector: bool | None = None
         self.conn.script(SCHEMA_PG if self.dialect == "postgres" else SCHEMA_SQLITE)
         self._migrate()
         self.conn.commit()
@@ -347,6 +368,9 @@ class Store:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+    def rollback(self) -> None:
+        self.conn.rollback()
 
     def reset(self) -> None:
         """Empty every table. For tests and for starting over on purpose."""
@@ -555,6 +579,57 @@ class Store:
 
     def verdict_count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) AS n FROM verdicts").fetchone()["n"]
+
+    # ---- embeddings (pgvector where it is available) --------------------
+    def has_pgvector(self) -> bool:
+        """Turn on the extension if this is Postgres and we may. The column stays text,
+        so nothing breaks without it — only the distance queries need the cast."""
+        if self.dialect != "postgres" or self._pgvector is not None:
+            return bool(self._pgvector)
+        try:
+            self.conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            self.conn.commit()
+            self._pgvector = True
+        except Exception:
+            self.conn.rollback()
+            self._pgvector = False
+        return bool(self._pgvector)
+
+    def put_embeddings(self, rows: Sequence[tuple[str, str, Sequence[float]]], model: str) -> int:
+        self.conn.executemany(
+            """INSERT INTO message_embeddings (message_id, model, vec, at) VALUES (?,?,?,?)
+               ON CONFLICT(message_id) DO UPDATE SET model=EXCLUDED.model, vec=EXCLUDED.vec, at=EXCLUDED.at""",
+            [(mid, model, json.dumps([round(float(x), 6) for x in vec]), _iso(now())) for mid, _model, vec in rows],
+        )
+        self.conn.commit()
+        return len(rows)
+
+    def get_embeddings(self, ids: Sequence[str]) -> dict[str, list[float]]:
+        out: dict[str, list[float]] = {}
+        for chunk in _chunks(list(ids), 900):
+            q = f"SELECT message_id, vec FROM message_embeddings WHERE message_id IN ({','.join('?' * len(chunk))})"
+            for row in self.conn.execute(q, chunk):
+                out[row["message_id"]] = json.loads(row["vec"])
+        return out
+
+    def missing_embeddings(self, ids: Sequence[str]) -> list[str]:
+        have = set(self.get_embeddings(ids))
+        return [i for i in ids if i not in have]
+
+    def similar_to(self, message_id: str, limit: int = 10) -> list[tuple[str, float]]:
+        """Nearest messages by cosine distance. Postgres + pgvector only."""
+        if not self.has_pgvector():
+            raise RuntimeError("similar_to needs Postgres with pgvector")
+        rows = self.conn.execute(
+            """SELECT message_id, 1 - (vec::vector <=> (SELECT vec::vector FROM message_embeddings WHERE message_id = ?)) AS sim
+                 FROM message_embeddings WHERE message_id <> ?
+                ORDER BY vec::vector <=> (SELECT vec::vector FROM message_embeddings WHERE message_id = ?)
+                LIMIT ?""",
+            (message_id, message_id, message_id, limit))
+        return [(r["message_id"], float(r["sim"])) for r in rows]
+
+    def embedding_count(self) -> int:
+        return self.conn.execute("SELECT COUNT(*) AS n FROM message_embeddings").fetchone()["n"]
 
     # ---- corrections ---------------------------------------------------
     def correct(self, message_id: str, action: Action, label: str | None = None, note: str | None = None) -> None:

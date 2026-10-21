@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .decide import DEFAULT_SPEC, Judge, JudgementSpec, apply_corrections, decide_all
+from .embed import DEFAULT_SIMILARITY, cluster
 from .gmail import Gmail
 from .models import Action, Message, Plan, PlanItem, Run, RunBatch
 from .rules import Rule
@@ -95,6 +96,66 @@ def build_plan(
         account=gmail.settings.account if gmail is not None else "",
         query=query, items=items, model=model, judge=(judge.name if judge else None),
     )
+
+
+@dataclass
+class Group:
+    """One review unit: messages that deserve the same answer, found by similarity."""
+
+    action: str
+    label: str | None
+    message_ids: list[str]
+    domains: str
+    sample_subject: str
+
+
+def digest_plan(plan: Plan, store: Store, *, similarity: float = DEFAULT_SIMILARITY,
+                embedder=None) -> list[Group]:
+    """Collapse a plan into groups a person can actually review.
+
+    Senders do not do this job — 200 messages came from 140 senders, 102 of them
+    with one message. Similarity does: forty shops sending a promotion collapse to
+    one decision. Grouping is within an action, so a group is always one answer.
+    """
+    ids = [i.message_id for i in plan.items]
+    messages = {m.id: m for m in store.get_messages(ids)}
+    vectors = store.get_embeddings(ids)
+    if embedder is not None:
+        missing = [m for m in ids if m not in vectors]
+        if missing:
+            fresh = embedder.embed_messages([messages[mid] for mid in missing if mid in messages])
+            rows = [(mid, embedder.name, vec) for mid, vec in zip([m for m in missing if m in messages], fresh)]
+            if rows:
+                store.put_embeddings(rows, embedder.name)
+                vectors.update({mid: vec for mid, _model, vec in rows})
+
+    by_action: dict[tuple[Action, str | None], list[str]] = {}
+    for item in plan.items:
+        by_action.setdefault((item.action, item.label), []).append(item.message_id)
+
+    groups: list[Group] = []
+    for (action, label), group_ids in sorted(by_action.items(), key=lambda kv: (kv[0][0].value, kv[0][1] or "")):
+        with_vectors = [(mid, vectors[mid]) for mid in group_ids if mid in vectors]
+        without = [mid for mid in group_ids if mid not in vectors]
+        clusters = [list(c) for c in cluster(with_vectors, similarity=similarity)] + [[mid] for mid in without]
+        for members in clusters:
+            present = [messages[m] for m in members if m in messages]
+            sample = max(present, key=lambda m: len(m.subject or ""), default=None)
+            groups.append(Group(
+                action=action.value, label=label, message_ids=members,
+                domains=_domains(present), sample_subject=(sample.subject if sample else "") or "",
+            ))
+    groups.sort(key=lambda g: (g.action, -len(g.message_ids)))
+    return groups
+
+
+def _domains(messages: Sequence[Message], limit: int = 3) -> str:
+    seen: list[str] = []
+    for m in messages:
+        domain = (m.from_addr or "").split("@")[-1]
+        if domain and domain not in seen:
+            seen.append(domain)
+    return ", ".join(seen[:limit]) or "—"
 
 
 @dataclass
