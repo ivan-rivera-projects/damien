@@ -22,6 +22,7 @@ class FakeGmailState:
         self.messages: dict[str, dict] = {}
         self.calls: list[tuple[str, str]] = []      # (method, path)
         self.mods: list[dict] = []                  # batchModify bodies
+        self.queries: list[str] = []                 # every q= that went out
         self.fail_mods = 0                          # fail the next N batchModify calls
         self.fail_status = 400
         self._next_label = 2
@@ -63,7 +64,8 @@ class FakeGmailState:
             return httpx.Response(204)
         if path.endswith("/messages"):
             raw_q = request.url.params.get("q", "") or ""
-            needle = raw_q.split(":")[-1].strip().lower()          # naive: 'in:inbox' -> 'inbox'
+            self.queries.append(raw_q)
+            needle = raw_q.split()[0].split(":")[-1].strip().lower()   # 'in:inbox -in:spam' -> 'inbox'
             ids = [mid for mid, m in self.messages.items() if not needle or needle in json.dumps(m).lower()]
             start = int(request.url.params.get("pageToken") or "0")
             max_results = int(request.url.params.get("maxResults", "100"))
@@ -99,7 +101,7 @@ def settings(tmp_path: Path) -> Settings:
         root=tmp_path, db_path=tmp_path / "damien.db", db_url=None, credentials_path=tmp_path / "credentials.json",
         token_path=tmp_path / "token.json", account="me@example.com", scopes=("x",), judge="fake",
         model="jev-latest", api_key=None, page_size=2, op_batch=2, judge_batch=2,
-        confidence_act=0.8, confidence_ask=0.55,
+        confidence_act=0.8, confidence_ask=0.55, protect_labels=("ACTION REQUIRED", "WAITING FOR"),
     )
 
 

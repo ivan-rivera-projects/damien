@@ -229,6 +229,10 @@ def default_rules() -> list[Rule]:
         return Condition(field=field, op=op, value=value)  # type: ignore[arg-type]
 
     return [
+        # Gmail's own tab classification, trusted: it already decided this is a real
+        # person's mail, so no model call is spent asking again.
+        Rule(id="r-gmail-personal", name="Keep what Gmail calls personal",
+             match=[c("label", "contains", "CATEGORY_PERSONAL")], action=Action.keep),
         Rule(id="r-receipts", name="File receipts, invoices and order confirmations",
              any_of=[[c("subject", "words", "receipt")],
                      [c("subject", "words", "invoice")],

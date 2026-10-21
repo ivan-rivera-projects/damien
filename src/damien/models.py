@@ -66,6 +66,19 @@ class Message(BaseModel):
     def in_inbox(self) -> bool:
         return "INBOX" in self.label_ids
 
+    @property
+    def category(self) -> str | None:
+        """Gmail's own tab category, lower-cased: 'promotions', 'updates', 'personal'…"""
+        for lid in self.label_ids:
+            if lid.startswith("CATEGORY_"):
+                return lid[len("CATEGORY_"):].lower()
+        return None
+
+    @property
+    def own_label_ids(self) -> list[str]:
+        """Labels the person made, as opposed to Google's: user labels are `Label_<n>`."""
+        return [lid for lid in self.label_ids if lid.startswith("Label_")]
+
 
 class Decision(BaseModel):
     message_id: str

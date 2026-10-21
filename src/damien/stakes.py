@@ -12,6 +12,7 @@ model said is still recorded beside it — the guardrail adds a reason, not a ve
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from .models import Message
 
@@ -36,6 +37,21 @@ MACHINERY = re.compile(
 )
 
 
+# Labels that mean "a human is waiting" — mail a model must not file away. The
+# person applied these themselves, so they outrank anything Google or Jev think.
+DEFAULT_PROTECTED: tuple[str, ...] = ("ACTION REQUIRED", "WAITING FOR", "Bills")
+
+
+def protected_label(message: Message, label_names: dict[str, str] | None,
+                    protected: Sequence[str] = DEFAULT_PROTECTED) -> str | None:
+    """The person's own label on this message, if it is one they protect."""
+    names = {(label_names or {}).get(lid, lid).strip().lower() for lid in message.own_label_ids}
+    for name in protected:
+        if name.strip().lower() in names:
+            return name
+    return None
+
+
 def _not_a_bulk_sender(message: Message) -> bool:
     return not message.list_unsubscribe and not message.list_id and not MACHINERY.search(message.from_addr or "")
 
@@ -44,7 +60,8 @@ def _is_a_reply(message: Message) -> bool:
     return (message.subject or "").lstrip().lower().startswith(("re:", "fwd:", "fw:"))
 
 
-def stake_floor(message: Message, *, machine_sent: float | None = None, importance: float | None = None) -> str | None:
+def stake_floor(message: Message, *, machine_sent: float | None = None, importance: float | None = None,
+                protected: str | None = None) -> str | None:
     """Why a model must not archive or trash this message, or None.
 
     Two of the three signals are evidence the request already paid for — the model's
@@ -56,6 +73,8 @@ def stake_floor(message: Message, *, machine_sent: float | None = None, importan
     importance and still filed as trash at 0.66. Reading the signals against each
     other is code's job, not the model's.
     """
+    if protected:
+        return f"the person labelled it {protected!r} themselves"
     if CONSEQUENTIAL.search(message.subject or ""):
         return "the subject names money, a deadline or an account problem"
     if _not_a_bulk_sender(message):

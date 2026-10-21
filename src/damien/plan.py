@@ -12,6 +12,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from .decide import DEFAULT_SPEC, Judge, JudgementSpec, apply_corrections, decide_all
+from .stakes import DEFAULT_PROTECTED
 from .gmail import Gmail
 from .models import Action, Message, Plan, PlanItem, Run, RunBatch
 from .rules import Rule
@@ -29,6 +30,7 @@ def build_plan(
     spec: JudgementSpec = DEFAULT_SPEC,
     judge_batch: int = 8,
     ask_below: float = 0.55,
+    protected_labels: Sequence[str] = (),
     limit: int | None = None,
     model: str | None = None,
 ) -> Plan:
@@ -48,7 +50,8 @@ def build_plan(
 
     label_names = gmail.labels() if gmail is not None else None
     decisions = decide_all(messages, rules=rules, judge=judge, spec=spec, batch_size=judge_batch,
-                           ask_below=ask_below, label_names=label_names, model=model)
+                           ask_below=ask_below, label_names=label_names, model=model,
+                           protected_labels=protected_labels or DEFAULT_PROTECTED)
     decisions = apply_corrections(decisions, {r["message_id"]: dict(r) for r in store.corrections(limit=10_000)})
     store.add_decisions(decisions, account=(gmail.settings.account if gmail is not None else ""))
 

@@ -133,3 +133,18 @@ def test_the_default_rules_no_longer_blanket_label_every_mailing_list():
     for rule in default_rules():
         fields = {c.field for c in rule.match} | {c.field for group in rule.any_of for c in group}
         assert "list_unsubscribe" not in fields or rule.action is Action.keep
+
+
+def test_gmail_categories_and_the_persons_own_labels_are_visble_on_a_message():
+    m = msg(label_ids=["INBOX", "CATEGORY_UPDATES", "Label_30", "Label_1"])
+    assert m.category == "updates"
+    assert set(m.own_label_ids) == {"Label_30", "Label_1"}
+    assert msg(label_ids=["INBOX"]).category is None
+
+
+def test_the_default_rules_keep_googles_personal_mail_without_asking_a_model():
+    from damien.rules import default_rules
+    rule = next(r for r in default_rules() if r.id == "r-gmail-personal")
+    assert rule.action is Action.keep
+    assert matches(rule, msg(label_ids=["INBOX", "CATEGORY_PERSONAL"])) is True
+    assert matches(rule, msg(label_ids=["INBOX", "CATEGORY_PROMOTIONS"])) is False

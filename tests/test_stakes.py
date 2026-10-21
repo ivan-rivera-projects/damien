@@ -5,7 +5,7 @@ from __future__ import annotations
 from damien.decide import DEFAULT_SPEC, Verdict, decide_message
 from damien.models import Action, Message, Source
 from damien.rules import Condition, Rule
-from damien.stakes import stake_floor
+from damien.stakes import protected_label, stake_floor
 
 
 def a_message(subject: str, **kw) -> Message:
@@ -106,3 +106,23 @@ def test_importance_alone_holds_anything_the_model_valued():
     m = a_message("Low stock alerts at the store")
     assert stake_floor(m, machine_sent=0.99, importance=2.4) is not None
     assert stake_floor(m, machine_sent=0.99, importance=1.2) is None
+
+
+# ---- the person's own labels -------------------------------------------------
+def test_a_label_the_person_gave_it_outranks_the_model():
+    m = a_message("Weekly roundup", label_ids=["INBOX", "Label_59"])
+    names = {"Label_59": "ACTION REQUIRED"}
+    assert protected_label(m, names, ("ACTION REQUIRED", "WAITING FOR")) == "ACTION REQUIRED"
+    assert stake_floor(m, machine_sent=0.99, importance=0.1, protected="ACTION REQUIRED") is not None
+    # a label they do not protect does not hold anything
+    assert protected_label(a_message("x", label_ids=["INBOX", "Label_30"]), {"Label_30": "Notes"},
+                           ("ACTION REQUIRED",)) is None
+
+
+def test_protected_labels_hold_a_decision_end_to_end():
+    m = a_message("Weekly roundup", label_ids=["INBOX", "Label_59"])
+    decision = decide_message(m, rules=(), spec=DEFAULT_SPEC, verdict=verdict("promotion"),
+                              label_names={"Label_59": "WAITING FOR"},
+                              protected_labels=("WAITING FOR",))
+    assert decision.action is Action.keep
+    assert "WAITING FOR" in decision.rationale

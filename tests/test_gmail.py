@@ -83,3 +83,21 @@ def test_a_401_refreshes_once_then_succeeds(settings):
     assert g.profile()["emailAddress"] == "me@example.com"
     assert calls["n"] == 2
     assert seen_tokens[0].endswith("test-token") and seen_tokens[1].endswith("refreshed-token")
+
+
+def test_spam_and_trash_are_excluded_unless_asked_for(gmail: Gmail, fake):
+    fake.add("m1")
+    gmail.list_ids("in:inbox")
+    assert fake.queries[0] == "in:inbox -in:spam -in:trash"
+
+    gmail.list_ids("in:anywhere")
+    assert fake.queries[1] == "in:anywhere"          # asked for it: untouched
+
+    gmail.list_ids("in:spam")
+    assert fake.queries[2] == "in:spam"
+
+
+def test_an_empty_query_still_means_the_inbox(gmail: Gmail, fake):
+    fake.add("m1")
+    gmail.list_ids("")
+    assert fake.queries[0] == "in:inbox -in:spam -in:trash"

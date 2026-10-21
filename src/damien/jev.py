@@ -48,18 +48,27 @@ IMPORTANCE_LEVELS = [
 ]
 
 
-def message_state(message: Message, context: str = "") -> dict[str, Any]:
-    """Small on purpose: headers + snippet. Jev is weakened by irrelevant material."""
-    state: dict[str, Any] = {
-        "message": {
-            "from": f"{message.from_name or ''} <{message.from_addr or ''}>".strip(),
-            "subject": message.subject or "",
-            "snippet": (message.snippet or "")[:600],
-            "labels": list(message.label_ids),
-            "has_attachment": message.has_attachment,
-            "is_mailing_list": bool(message.list_id or message.list_unsubscribe),
-        }
+def message_state(message: Message, context: str = "", label_names: dict[str, str] | None = None) -> dict[str, Any]:
+    """Small on purpose: headers + snippet. Jev is weakened by irrelevant material.
+
+    Two things are added because they are free and worth more than anything the
+    model could infer: `gmail_category` (Google already classified it) and
+    `your_labels` (the person already decided).
+    """
+    names = label_names or {}
+    block: dict[str, Any] = {
+        "from": f"{message.from_name or ''} <{message.from_addr or ''}>".strip(),
+        "subject": message.subject or "",
+        "snippet": (message.snippet or "")[:600],
+        "has_attachment": message.has_attachment,
+        "is_mailing_list": bool(message.list_id or message.list_unsubscribe),
     }
+    if message.category:
+        block["gmail_category"] = message.category
+    own = [names.get(lid, lid) for lid in message.own_label_ids]
+    if own:
+        block["your_labels"] = own
+    state: dict[str, Any] = {"message": block}
     if context:
         state["reader"] = context
     return state
@@ -70,7 +79,10 @@ def build_questions(spec: JudgementSpec) -> dict[str, dict[str, Any]]:
     return {
         "bucket": {
             "type": "choice",
-            "instructions": "Which of these best describes `message` for `reader`?",
+            "instructions": "Which of these best describes `message` for `reader`? "
+                            "`message.gmail_category` is Google's own tab guess about it; "
+                            "`message.your_labels`, where present, are labels `reader` applied "
+                            "themselves — those matter more.",
             "criteria": {b.key: b.description for b in spec.buckets},
         },
         "handled_by_a_machine": {
@@ -147,7 +159,7 @@ class JevJudge:
         return body
 
     def _post(self, message: Message, context: str) -> Verdict:
-        body = self._body(message_state(message, context), build_questions(self.spec))
+        body = self._body(message_state(message, context, getattr(self, "label_names", None)), build_questions(self.spec))
         delay = 0.4
         last: Exception | None = None
         for attempt in range(5):
@@ -174,8 +186,10 @@ class JevJudge:
         raise RuntimeError(f"gave up calling Jev for {message.id}: {last}")
 
     # ---- the Judge interface -----------------------------------------
-    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "") -> list[Verdict]:
+    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
+              label_names: dict[str, str] | None = None) -> list[Verdict]:
         out: list[Verdict] = []
+        self.label_names = label_names or {}
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
             futures = [pool.submit(self._post, m, context) for m in messages]
             for message, future in zip(messages, futures):
@@ -197,7 +211,8 @@ class FakeJudge:
         self.calls = 0
         self.spent_usd = 0.0
 
-    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "") -> list[Verdict]:
+    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
+              label_names: dict[str, str] | None = None) -> list[Verdict]:
         out = []
         for message in messages:
             self.calls += 1

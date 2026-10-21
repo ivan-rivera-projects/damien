@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from .models import Action, Decision, Message, Source
 from .rules import Rule, first_match
-from .stakes import stake_floor
+from .stakes import DEFAULT_PROTECTED, protected_label, stake_floor
 
 
 class Verdict(BaseModel):
@@ -41,7 +41,8 @@ class Judge(Protocol):
 
     name: str
 
-    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "") -> list[Verdict]:
+    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
+              label_names: dict[str, str] | None = None) -> list[Verdict]:
         ...
 
 
@@ -97,7 +98,8 @@ class PersonJudge:
 
     name = "person"
 
-    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "") -> list[Verdict]:
+    def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
+              label_names: dict[str, str] | None = None) -> list[Verdict]:
         return [Verdict(message_id=m.id, choice="unclear", confidence=0.0,
                         rationale="no judge configured — left in place for a person to decide") for m in messages]
 
@@ -110,6 +112,7 @@ def decide_message(
     spec: JudgementSpec,
     label_names: dict[str, str] | None = None,
     model: str | None = None,
+    protected_labels: Sequence[str] = DEFAULT_PROTECTED,
 ) -> Decision:
     rule = first_match(rules, message, label_names)
     if rule is not None:
@@ -133,7 +136,8 @@ def decide_message(
     if decision.action is not Action.keep:
         signals = verdict.signals or {}
         held = stake_floor(message, machine_sent=signals.get("handled_by_a_machine"),
-                           importance=signals.get("importance"))
+                           importance=signals.get("importance"),
+                           protected=protected_label(message, label_names, protected_labels))
         if held:
             return decision.model_copy(update={
                 "action": Action.keep, "label": None,
@@ -152,6 +156,7 @@ def decide_all(
     ask_below: float = 0.55,
     label_names: dict[str, str] | None = None,
     model: str | None = None,
+    protected_labels: Sequence[str] = DEFAULT_PROTECTED,
 ) -> list[Decision]:
     """Rules for everything they cover; the judge only sees the rest, in batches."""
     decisions: list[Decision] = []
@@ -160,22 +165,24 @@ def decide_all(
     for message in messages:
         rule = first_match(rules, message, label_names)
         if rule is not None:
-            decisions.append(decide_message(message, rules=(rule,), verdict=None, spec=spec, label_names=label_names, model=model))
+            decisions.append(decide_message(message, rules=(rule,), verdict=None, spec=spec, label_names=label_names,
+                                            model=model, protected_labels=protected_labels))
         else:
             residue.append(message)
 
     if judge is None or not residue:
         for message in residue:
-            decisions.append(decide_message(message, rules=(), verdict=None, spec=spec, model=model))
+            decisions.append(decide_message(message, rules=(), verdict=None, spec=spec, model=model,
+                                            protected_labels=protected_labels))
         return decisions
 
     criteria = spec.criteria()
     for chunk in _chunks(residue, max(1, batch_size)):
-        verdicts = judge.judge(chunk, criteria, context=spec.context)
+        verdicts = judge.judge(chunk, criteria, context=spec.context, label_names=label_names)
         by_id = {v.message_id: v for v in verdicts}
         for message in chunk:
             decisions.append(decide_message(message, rules=(), verdict=by_id.get(message.id), spec=spec,
-                                            label_names=label_names, model=model))
+                                            label_names=label_names, model=model, protected_labels=protected_labels))
     return enforce_confidence(decisions, ask_below=ask_below)
 
 

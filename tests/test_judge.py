@@ -30,8 +30,17 @@ def a_message(mid: str = "m1", **kw) -> Message:
 def test_state_is_small_and_has_no_body():
     state = message_state(a_message(), "a producer's inbox")
     assert set(state) == {"message", "reader"}
-    assert set(state["message"]) == {"from", "subject", "snippet", "labels", "has_attachment", "is_mailing_list"}
+    assert set(state["message"]) == {"from", "subject", "snippet", "has_attachment", "is_mailing_list"}
     assert state["reader"] == "a producer's inbox"
+    assert "gmail_category" not in state["message"]      # only when Gmail said something
+    assert "your_labels" not in state["message"]         # only when the person did
+
+
+def test_state_carries_googles_category_and_the_persons_own_labels():
+    m = a_message(label_ids=["INBOX", "CATEGORY_PROMOTIONS", "Label_30"])
+    state = message_state(m, "", {"Label_30": "Bills"})
+    assert state["message"]["gmail_category"] == "promotions"
+    assert state["message"]["your_labels"] == ["Bills"]
 
 
 def test_questions_are_atomic_and_within_the_documented_limits():
@@ -83,9 +92,9 @@ def test_rules_win_and_the_judge_only_sees_the_residue():
     class Counting(FakeJudge):
         seen: ClassVar[list[str]] = []
 
-        def judge(self, messages, buckets, *, context=""):
+        def judge(self, messages, buckets, *, context="", label_names=None):
             Counting.seen = [m.id for m in messages]
-            return super().judge(messages, buckets, context=context)
+            return super().judge(messages, buckets, context=context, label_names=label_names)
 
     decisions = decide_all([a_message("m1"), a_message("m2", subject="Big SALE 50% off")],
                            rules=rules, judge=Counting())

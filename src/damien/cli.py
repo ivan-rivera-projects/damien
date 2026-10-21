@@ -150,7 +150,7 @@ def plan_build(
         try:
             plan = build_plan(store=store, gmail=gmail, rules=rules, judge=judge, query=query, limit=limit,
                               judge_batch=settings.judge_batch, ask_below=settings.confidence_ask,
-                              model=settings.model)
+                              protected_labels=settings.protect_labels, model=settings.model)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)

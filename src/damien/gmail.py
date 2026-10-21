@@ -149,7 +149,13 @@ class Gmail:
         return data["id"]
 
     def list_ids(self, query: str, *, limit: int | None = None) -> list[str]:
-        """Every matching id, paged. Ids only — no per-message call."""
+        """Every matching id, paged. Ids only — no per-message call.
+
+        Spam and Trash are excluded unless the query names them: Google's spam
+        filter is better than anything this tool could do, so it is trusted by
+        default rather than second-guessed.
+        """
+        query = _exclude_spam_and_trash(query)
         ids: list[str] = []
         page = None
         while True:
@@ -210,6 +216,13 @@ class Gmail:
 
     def add_label(self, ids: Sequence[str], label_id: str, *, keep_in_inbox: bool = False) -> int:
         return self.modify(ids, add=[label_id], remove=[] if keep_in_inbox else ["INBOX"])
+
+
+def _exclude_spam_and_trash(query: str) -> str:
+    q = query or "in:inbox"
+    if not any(token in q for token in ("in:spam", "in:trash", "in:anywhere")):
+        q = f"{q} -in:spam -in:trash"
+    return q
 
 
 def _chunks(items: list, size: int) -> Iterator[list]:

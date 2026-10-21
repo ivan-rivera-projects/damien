@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .stakes import DEFAULT_PROTECTED
+
 # The only Gmail scope Damien needs: read, label, archive, trash, draft.
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 
@@ -57,6 +59,7 @@ class Settings:
     judge_batch: int              # messages per judgment call
     confidence_act: float         # >= this: act unattended
     confidence_ask: float         # < this: a person should look
+    protect_labels: tuple[str, ...]   # the person's own labels a model must not file away
 
     def redacted(self) -> dict[str, object]:
         d = dict(self.__dict__)
@@ -105,4 +108,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         judge_batch=int(num("DAMIEN_JUDGE_BATCH", 8)),
         confidence_act=num("DAMIEN_CONFIDENCE_ACT", 0.80),
         confidence_ask=num("DAMIEN_CONFIDENCE_ASK", 0.55),
+        protect_labels=tuple(
+            p.strip() for p in (env("DAMIEN_PROTECT_LABELS") or ",".join(DEFAULT_PROTECTED)).split(",") if p.strip()
+        ),
     )
