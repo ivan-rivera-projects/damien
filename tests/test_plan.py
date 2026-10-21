@@ -405,3 +405,35 @@ def test_a_message_matching_two_rules_takes_the_first(store: Store, gmail, fake)
     ]
     plan = plan_from_rules(store=store, gmail=gmail, rules=rules, sample=0)
     assert len(plan.items) == 1 and plan.items[0].rule_id == "r-first"
+
+
+def test_a_long_fetch_keeps_what_it_already_got(store: Store, gmail, fake):
+    """A four-thousand-message fetch takes minutes; a pass that dies at 3,900 must
+    keep 3,750 of them rather than starting again from nothing."""
+    import httpx
+
+    from damien.gmail import Gmail, GmailError
+
+    for i in range(10):
+        fake.add(f"m{i}", subject=f"message {i}")
+
+    calls = {"n": 0}
+    inner = fake.handler
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        if "/messages/" in request.url.path:
+            calls["n"] += 1
+            if calls["n"] > 4:                       # die partway through the second window
+                return httpx.Response(400, text="boom")   # a hard failure: not retried
+        return inner(request)
+
+    g = Gmail(store.conn and gmail.settings, http=httpx.Client(transport=httpx.MockTransport(flaky)))
+    g._creds = gmail._creds
+    g.limiter = gmail.limiter
+    ids = [f"m{i}" for i in range(10)]
+    try:
+        load_messages(store=store, gmail=g, ids=ids, window=4)
+    except GmailError:
+        pass
+    assert store.count_messages() >= 4               # the first window survived the failure
+    assert g.fetched >= 4

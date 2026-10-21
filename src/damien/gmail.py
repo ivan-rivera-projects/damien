@@ -143,10 +143,22 @@ class Gmail:
 
     # ---- transport ----------------------------------------------------
     def _request(self, method: str, url: str, *, params: dict | None = None, json_body: dict | None = None,
-                 attempts: int = 10) -> dict:
+                 attempts: int = 4) -> dict:
+        """One HTTP call, with a retry policy per failure type.
+
+        A quota ceiling is worth waiting out — it clears, and it clears sooner if we
+        stop pushing. A broken endpoint is not: waiting four minutes per request
+        across a few thousand requests is how a run never ends. So a plain server
+        error gets four tries inside a minute, and a throttle switches this request
+        to ten tries with a minute's patience.
+        """
         delay = 0.5
+        cap = 8.0
+        max_attempts = attempts
         last: Exception | None = None
-        for attempt in range(attempts):
+        attempt = 0
+        while attempt < max_attempts:
+            attempt += 1
             self.limiter.take()
             resp: httpx.Response | None = None
             try:
@@ -157,7 +169,7 @@ class Gmail:
             except httpx.HTTPError as exc:                     # network: retry
                 last = exc
             else:
-                if resp.status_code == 401 and attempt == 0:
+                if resp.status_code == 401 and attempt == 1:
                     self._force_refresh()                       # token aged out mid-run: refresh once, in place
                     continue
                 if resp.status_code in (429, 500, 502, 503, 504, 529) or _is_throttle(resp):
@@ -166,6 +178,7 @@ class Gmail:
                     if resp.status_code == 429 or _is_throttle(resp):
                         self.throttled += 1
                         self.limiter.slow_down()          # the ceiling is real: back off for the rest of the run
+                        max_attempts, cap = 10, 60.0      # this one is worth waiting out
                         delay = max(delay, 3.0)
                     last = GmailError(f"{resp.status_code}: {resp.text[:200]}")
                 elif resp.status_code >= 400:
@@ -174,8 +187,8 @@ class Gmail:
                     return resp.json() if resp.content else {}
             wait = _retry_after(resp) if resp is not None else None
             time.sleep(wait if wait is not None else delay + random.random() * 0.2)
-            delay = min(delay * 2, 60.0)
-        raise GmailError(f"gave up after {attempts} attempts: {last}")
+            delay = min(delay * 2, cap)
+        raise GmailError(f"gave up after {max_attempts} attempts: {last}")
 
     # ---- reads --------------------------------------------------------
     def profile(self) -> dict:

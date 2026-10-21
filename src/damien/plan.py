@@ -23,13 +23,21 @@ from .store import Store
 DEFAULT_HEADER_TTL_HOURS = 12.0
 
 
+FETCH_WINDOW = 250
+
+
 def load_messages(*, store: Store, gmail: Gmail, ids: Sequence[str],
-                  ttl_hours: float = DEFAULT_HEADER_TTL_HOURS) -> tuple[list[Message], int]:
+                  ttl_hours: float = DEFAULT_HEADER_TTL_HOURS,
+                  window: int = FETCH_WINDOW) -> tuple[list[Message], int]:
     """Headers for these ids: from the store when they are fresh, from Gmail otherwise.
 
     Headers do not change; labels do. The TTL is the honesty dial — inside it we
     reuse what we already downloaded (a re-plan costs nothing), and past it we pay
     for a fresh copy. `ttl_hours=0` always refetches.
+
+    Downloads are written in windows. A four-thousand-message fetch takes minutes
+    under Gmail's quota, so it says where it is and keeps what it has: a pass that
+    dies at 3,900 keeps 3,750 of them, and the next one starts there.
     """
     ids = list(ids)
     if not ids:
@@ -37,9 +45,15 @@ def load_messages(*, store: Store, gmail: Gmail, ids: Sequence[str],
     cutoff = None if ttl_hours <= 0 else (datetime.now(UTC) - timedelta(hours=ttl_hours)).isoformat()
     fresh = store.seen_recently(ids, cutoff) if cutoff else set()
     missing = [i for i in ids if i not in fresh]
-    fetched = gmail.fetch(missing) if missing else []
-    if fetched:
-        store.upsert_messages(fetched)
+    fetched: list[Message] = []
+    for start in range(0, len(missing), max(1, window)):
+        window_ids = missing[start:start + max(1, window)]
+        got = gmail.fetch(window_ids)
+        fetched.extend(got)
+        store.upsert_messages(got)
+        if len(missing) > window:
+            import sys
+            print(f"  fetched {len(fetched):,}/{len(missing):,} new message(s)…", file=sys.stderr, flush=True)
     cached = store.get_messages([i for i in ids if i in fresh]) if fresh else []
     by_id = {m.id: m for m in [*cached, *fetched]}
     return [by_id[i] for i in ids if i in by_id], len(fetched)
