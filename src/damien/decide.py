@@ -135,6 +135,7 @@ def decide_message(
         decision = Decision(
             message_id=message.id, action=rule.action, label=rule.label, source=Source.rule,
             rule_id=rule.id, rationale=f"rule: {rule.name}", confidence=1.0,
+            keep_in_inbox=rule.keep_in_inbox,
         )
         # A rule the *person* wrote is their instruction and stands. A rule this tool
         # shipped, or minted from a group, is still somebody else's guess — and one of
@@ -158,7 +159,7 @@ def decide_message(
     decision = Decision(
         message_id=message.id, action=bucket.action, label=bucket.label, source=Source.jev,
         rationale=verdict.rationale or bucket.description, confidence=verdict.confidence,
-        probabilities=verdict.probabilities, model=model,
+        probabilities=verdict.probabilities, model=model, keep_in_inbox=bucket.keep_in_inbox,
     )
     # The guardrail: the model may not quietly file away money, deadlines or a person.
     if decision.action is not Action.keep:

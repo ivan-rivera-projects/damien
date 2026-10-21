@@ -451,3 +451,35 @@ def test_a_size_floor_hides_the_singletons(store: Store):
     groups = digest_plan(plan, store, similarity=0.9)
     assert len(groups) == 3
     assert max(len(g.message_ids) for g in groups) == 2       # the pair, then two singletons
+
+
+
+def test_a_rule_can_label_something_and_leave_it_in_the_inbox(store: Store, gmail, fake):
+    """The Promotions tab is a view *of the inbox*. Applying CATEGORY_PROMOTIONS and removing
+    INBOX puts the message in All Mail with the label instead - searchable, but not in the
+    tab. A rule's keep_in_inbox used to be dropped by the executor outright."""
+    fake.labels["CATEGORY_PROMOTIONS"] = "CATEGORY_PROMOTIONS"
+    fake.add("m1", subject="marketing", sender="seller@sell.amazon.com", labels=["INBOX", "UNREAD"])
+    fake.add("m2", subject="account report", sender="seller@sell.amazon.com", labels=["INBOX", "UNREAD"])
+    rule = Rule(id="r-seller", name="seller mail -> promotions tab", action=Action.label,
+                label="CATEGORY_PROMOTIONS", keep_in_inbox=True,
+                match=[Condition(field="from", op="contains", value="sell.amazon.com")])
+    plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
+    assert plan.counts() == {"label": 2}
+    assert all(i.keep_in_inbox for i in plan.items)
+    token = approve(store, plan.id)
+    apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
+    body = fake.mods[-1]
+    assert body["addLabelIds"] == ["CATEGORY_PROMOTIONS"]
+    assert body["removeLabelIds"] == []                     # not ["INBOX"]: it stays in the tab
+
+
+def test_a_label_without_keep_in_inbox_still_leaves_the_inbox(store: Store, gmail, fake):
+    fake.add("m1", subject="digest", sender="a@news.example", labels=["INBOX", "UNREAD"])
+    rule = Rule(id="r-news", name="newsletters", action=Action.label, label="Newsletters",
+                match=[Condition(field="from", op="contains", value="news.example")])
+    plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
+    assert not plan.items[0].keep_in_inbox
+    token = approve(store, plan.id)
+    apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
+    assert fake.mods[-1]["removeLabelIds"] == ["INBOX"]

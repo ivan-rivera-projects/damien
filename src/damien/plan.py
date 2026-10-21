@@ -103,7 +103,7 @@ def build_plan(
 
     items = [
         PlanItem(message_id=d.message_id, action=d.action, label=d.label, source=d.source,
-                 rule_id=d.rule_id, confidence=d.confidence)
+                 rule_id=d.rule_id, confidence=d.confidence, keep_in_inbox=d.keep_in_inbox)
         for d in decisions
     ]
     return store.create_plan(
@@ -191,7 +191,8 @@ def plan_from_rules(*, store: Store, gmail: Gmail, rules: Sequence[Rule], limit:
         scoped = f"{scope} {query}".strip() if scope else query
         for mid in gmail.list_ids(scoped, limit=limit):
             items.setdefault(mid, PlanItem(message_id=mid, action=rule.action, label=rule.label,
-                                           source=Source.rule, rule_id=rule.id))
+                                           source=Source.rule, rule_id=rule.id,
+                                           keep_in_inbox=rule.keep_in_inbox))
     plan = store.create_plan(
         account=gmail.settings.account or "", query=f"rules: {', '.join(used) or 'none'}",
         items=list(items.values()), judge="rules",
@@ -311,18 +312,18 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
 
     index = 0
     try:
-        for (action, label), ids in groups:
+        for (action, label, keep_in_inbox), ids in groups:
             for chunk in _chunks(ids, gmail.settings.op_batch):
                 if index in done:
                     index += 1
                     continue
                 label_id = None
-                if action == Action.label:
-                    label_id = label_cache.get(label or "") or gmail.label_id(label or "")
+                if action is Action.label:
+                    label_id = gmail.label_id(label or "") or label_cache.get(label or "")
                     if label_id is None and label:
                         label_id = gmail.create_label(label)
                         label_cache[label] = label_id
-                op, inverse = _perform(gmail, action, chunk, label_id)
+                op, inverse = _perform(gmail, action, chunk, label_id, keep_in_inbox)
                 store.journal_batch(run.id, RunBatch(index=index, op=op, ids=chunk, label=label, inverse=inverse))
                 index += 1
     except Exception as exc:                      # journal already holds what landed
@@ -350,16 +351,19 @@ def undo_run(*, store: Store, gmail: Gmail, run_id: str) -> Run:
     return store.get_run(run.id)  # type: ignore[return-value]
 
 
-def _group_items(items: Sequence[PlanItem]) -> list[tuple[tuple[Action, str | None], list[str]]]:
-    groups: dict[tuple[Action, str | None], list[str]] = {}
+def _group_items(items: Sequence[PlanItem]) -> list[tuple[tuple[Action, str | None, bool], list[str]]]:
+    """One group per (action, label, keep_in_inbox): a group is one call, and two items
+    that differ on whether INBOX is removed cannot share one."""
+    groups: dict[tuple[Action, str | None, bool], list[str]] = {}
     for item in items:
         if item.action in (Action.keep,):
             continue
-        groups.setdefault((item.action, item.label), []).append(item.message_id)
-    return [(key, sorted(ids)) for key, ids in sorted(groups.items(), key=lambda kv: (kv[0][0].value, kv[0][1] or ""))]
+        groups.setdefault((item.action, item.label, item.keep_in_inbox), []).append(item.message_id)
+    return [(key, sorted(ids)) for key, ids in sorted(groups.items(), key=lambda kv: (kv[0][0].value, kv[0][1] or "", kv[0][2]))]
 
 
-def _perform(gmail: Gmail, action: Action, ids: list[str], label_id: str | None) -> tuple[str, dict[str, object]]:
+def _perform(gmail: Gmail, action: Action, ids: list[str], label_id: str | None,
+             keep_in_inbox: bool = False) -> tuple[str, dict[str, object]]:
     if action == Action.archive:
         gmail.archive(ids)
         return "archive", {"add": ["INBOX"], "remove": []}
@@ -370,8 +374,8 @@ def _perform(gmail: Gmail, action: Action, ids: list[str], label_id: str | None)
         gmail.mark_read(ids)
         return "mark_read", {"add": ["UNREAD"], "remove": []}
     if action == Action.label and label_id:
-        gmail.add_label(ids, label_id)
-        return "label", {"add": ["INBOX"], "remove": [label_id]}
+        gmail.add_label(ids, label_id, keep_in_inbox=keep_in_inbox)
+        return "label", {"add": ["INBOX"] if not keep_in_inbox else [], "remove": [label_id]}
     raise ValueError(f"nothing to do for action {action.value}")
 
 

@@ -461,6 +461,7 @@ def rules_plan(
         typer.echo(json.dumps({"plan": plan.id, "counts": counts,
                                "sample": [{"message_id": i.message_id, "action": i.action.value,
                                            "label": i.label, "rule_id": i.rule_id,
+                                           "keep_in_inbox": i.keep_in_inbox,
                                            "subject": m.subject, "from": m.from_addr} for i, m in rows]},
                               indent=2, default=str))
         return

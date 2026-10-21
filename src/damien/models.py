@@ -90,6 +90,7 @@ class Decision(BaseModel):
     confidence: float | None = None
     probabilities: dict[str, float] | None = None
     model: str | None = None
+    keep_in_inbox: bool = False
     at: datetime = Field(default_factory=now)
 
     def acts_unattended(self, threshold: float) -> bool:
@@ -104,6 +105,7 @@ class PlanItem(BaseModel):
     message_id: str
     action: Action
     label: str | None = None
+    keep_in_inbox: bool = False       # label it, but leave it in the inbox (the Promotions tab)
     source: Source = Source.default
     rule_id: str | None = None
     confidence: float | None = None

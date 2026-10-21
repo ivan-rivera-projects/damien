@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS plan_items (
   source TEXT NOT NULL,
   rule_id TEXT,
   confidence DOUBLE PRECISION,
+  keep_in_inbox INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (plan_id, message_id)
 );
 
@@ -340,7 +341,10 @@ class Store:
 
     # Columns added after the first release. CREATE TABLE IF NOT EXISTS cannot add a
     # column to an existing table, and this tool must survive its own schema changes.
-    ADDED_COLUMNS: ClassVar[dict[str, dict[str, str]]] = {"messages": {"list_id": "TEXT"}}
+    ADDED_COLUMNS: ClassVar[dict[str, dict[str, str]]] = {
+        "messages": {"list_id": "TEXT"},
+        "plan_items": {"keep_in_inbox": "INTEGER NOT NULL DEFAULT 0"},
+    }
 
     def __init__(self, target: Path | str):
         self.target = str(target)
@@ -476,9 +480,10 @@ class Store:
             (plan.id, account, query, plan.status, plan.token, _iso(plan.created_at), model, judge),
         )
         self.conn.executemany(
-            """INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence)
-               VALUES (?,?,?,?,?,?,?)""",
-            [(plan.id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence) for i in plan.items],
+            """INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence, keep_in_inbox)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            [(plan.id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence,
+              int(i.keep_in_inbox)) for i in plan.items],
         )
         self.conn.commit()
         return plan
@@ -489,7 +494,8 @@ class Store:
             return None
         items = [
             PlanItem(message_id=r["message_id"], action=Action(r["action"]), label=r["label"],
-                     source=Source(r["source"]), rule_id=r["rule_id"], confidence=r["confidence"])
+                     source=Source(r["source"]), rule_id=r["rule_id"], confidence=r["confidence"],
+                     keep_in_inbox=bool(r["keep_in_inbox"]))
             for r in self.conn.execute("SELECT * FROM plan_items WHERE plan_id=? ORDER BY message_id", (plan_id,))
         ]
         return Plan(id=row["id"], account=row["account"], query=row["query"], status=row["status"],
@@ -511,8 +517,10 @@ class Store:
     def update_plan_items(self, plan_id: str, items: Sequence[PlanItem]) -> None:
         self.conn.execute("DELETE FROM plan_items WHERE plan_id=?", (plan_id,))
         self.conn.executemany(
-            "INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence) VALUES (?,?,?,?,?,?,?)",
-            [(plan_id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence) for i in items],
+            "INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence, keep_in_inbox)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            [(plan_id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence,
+              int(i.keep_in_inbox)) for i in items],
         )
         self.conn.commit()
 
