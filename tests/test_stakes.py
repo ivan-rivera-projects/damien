@@ -175,3 +175,38 @@ def test_a_read_marketing_blast_the_model_would_trash_is_held():
     decision = decide_message(m, rules=(), spec=DEFAULT_SPEC, verdict=verdict("promotion", machine_sent=0.99))
     assert decision.action is Action.keep
     assert "important" in decision.rationale.lower()
+
+
+# ---- the floor guards the tool's own rules, not just the model ----------------
+def test_a_seeded_rule_may_not_file_an_alarm():
+    """r-receipts matched "Action required: Invoice overdue" and labelled it Receipts,
+    because a rule's decision used to return before the floor ran."""
+    seeded = Rule(id="r-receipts", name="receipts", action=Action.label, label="Receipts", source="seed",
+                  any_of=[[Condition(field="subject", op="words", value="invoice")]])
+    decision = decide_message(a_message("Action required: Invoice overdue"), rules=[seeded], verdict=None,
+                              spec=DEFAULT_SPEC)
+    assert decision.action is Action.keep
+    assert "held for a person" in decision.rationale
+    assert "r-receipts" in decision.rationale                     # which rule is named
+
+
+def test_a_rule_the_person_wrote_is_never_second_guessed():
+    mine = Rule(id="r-mine", name="file my overdue invoices", action=Action.archive, source="person",
+                match=[Condition(field="subject", op="words", value="invoice")])
+    decision = decide_message(a_message("Action required: Invoice overdue"), rules=[mine], verdict=None,
+                              spec=DEFAULT_SPEC)
+    assert decision.action is Action.archive
+    assert decision.source is Source.rule
+
+
+def test_an_ordinary_receipt_still_gets_labelled_by_the_seeded_rule():
+    seeded = Rule(id="r-receipts", name="receipts", action=Action.label, label="Receipts", source="seed",
+                  any_of=[[Condition(field="subject", op="words", value="invoice")]])
+    decision = decide_message(a_message("Your invoice from Acme #1234"), rules=[seeded], verdict=None,
+                              spec=DEFAULT_SPEC)
+    assert decision.action is Action.label and decision.label == "Receipts"
+
+
+def test_the_shipped_rules_are_marked_as_seeded():
+    from damien.rules import default_rules
+    assert {r.source for r in default_rules()} == {"seed"}

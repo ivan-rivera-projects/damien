@@ -127,10 +127,22 @@ def decide_message(
 ) -> Decision:
     rule = first_match(rules, message, label_names)
     if rule is not None:
-        return Decision(
+        decision = Decision(
             message_id=message.id, action=rule.action, label=rule.label, source=Source.rule,
             rule_id=rule.id, rationale=f"rule: {rule.name}", confidence=1.0,
         )
+        # A rule the *person* wrote is their instruction and stands. A rule this tool
+        # shipped, or minted from a group, is still somebody else's guess — and one of
+        # those was filing "Action required: Invoice overdue" as a neutral Receipt.
+        if rule.source != "person" and decision.action is not Action.keep:
+            held = stake_floor(message, action=decision.action,
+                               protected=protected_label(message, label_names, protected_labels))
+            if held:
+                return decision.model_copy(update={
+                    "action": Action.keep, "label": None,
+                    "rationale": f"held for a person — {held} (a rule said {rule.action.value}: {rule.name})",
+                })
+        return decision
     if verdict is None:
         return Decision(message_id=message.id, action=Action.keep, source=Source.default,
                         rationale="no rule matched and no judgment was made")

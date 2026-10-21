@@ -286,21 +286,23 @@ def default_rules() -> list[Rule]:
     def c(field: str, op: str, value: object = None) -> Condition:
         return Condition(field=field, op=op, value=value)  # type: ignore[arg-type]
 
+    # source="seed": shipped, not written by the person — so the stake floor applies
+    # to them. A rule the person writes is source="person" and is never second-guessed.
     return [
         # Gmail's own tab classification, trusted: it already decided this is a real
         # person's mail, so no model call is spent asking again.
         Rule(id="r-gmail-personal", name="Keep what Gmail calls personal",
-             match=[c("label", "contains", "CATEGORY_PERSONAL")], action=Action.keep),
+             match=[c("label", "contains", "CATEGORY_PERSONAL")], action=Action.keep, source="seed"),
         Rule(id="r-receipts", name="File receipts, invoices and order confirmations",
              any_of=[[c("subject", "words", "receipt")],
                      [c("subject", "words", "invoice")],
                      [c("subject", "words", "order confirmation")],
                      [c("subject", "words", "payment received")]],
-             action=Action.label, label="Receipts"),
+             action=Action.label, label="Receipts", source="seed"),
         Rule(id="r-old-promotions", name="Trash promotions older than a year",
              match=[c("label", "contains", "CATEGORY_PROMOTIONS"), c("age_days", "gt", 365)],
-             action=Action.trash),
+             action=Action.trash, source="seed"),
         Rule(id="r-old-social", name="Archive social notifications older than 6 months",
              match=[c("label", "contains", "CATEGORY_SOCIAL"), c("age_days", "gt", 182)],
-             action=Action.archive),
+             action=Action.archive, source="seed"),
     ]
