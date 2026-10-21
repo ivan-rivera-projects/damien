@@ -352,10 +352,13 @@ def default_rules() -> list[Rule]:
     # source="seed": shipped, not written by the person — so the stake floor applies
     # to them. A rule the person writes is source="person" and is never second-guessed.
     return [
-        # Gmail's own tab classification, trusted: it already decided this is a real
-        # person's mail, so no model call is spent asking again.
-        Rule(id="r-gmail-personal", name="Keep what Gmail calls personal",
-             match=[c("label", "contains", "CATEGORY_PERSONAL")], action=Action.keep, source="seed"),
+        # There is deliberately no "Gmail calls it personal -> keep" rule here. There was,
+        # and it was wrong: Gmail's own account of the Personal category is that engagement
+        # is its strongest signal, so a sender you have ever transacted with has its
+        # *marketing* filed as Personal too. Ivan's Alibaba suppliers are exactly that -
+        # 45 marketing blasts sat unjudged behind it, and 826 of one plan's 7,543 messages
+        # never reached the model or any other rule. A shortcut that runs before judgment
+        # has to be certain, and a tab guess is not.
         Rule(id="r-receipts", name="File receipts, invoices and order confirmations",
              any_of=[[c("subject", "words", "receipt")],
                      [c("subject", "words", "invoice")],

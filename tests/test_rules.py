@@ -142,12 +142,22 @@ def test_gmail_categories_and_the_persons_own_labels_are_visble_on_a_message():
     assert msg(label_ids=["INBOX"]).category is None
 
 
-def test_the_default_rules_keep_googles_personal_mail_without_asking_a_model():
+def test_the_default_rules_do_not_short_circuit_on_a_gmail_category():
+    """There was a "CATEGORY_PERSONAL -> keep" rule. Gmail's Personal category includes
+    marketing from anyone you have transacted with (engagement is its strongest signal),
+    so the rule filed 45 Alibaba blasts unjudged - and 826 of one plan's 7,543 messages
+    never reached the model. A shortcut that runs before judgment must be certain."""
     from damien.rules import default_rules
-    rule = next(r for r in default_rules() if r.id == "r-gmail-personal")
-    assert rule.action is Action.keep
-    assert matches(rule, msg(label_ids=["INBOX", "CATEGORY_PERSONAL"])) is True
-    assert matches(rule, msg(label_ids=["INBOX", "CATEGORY_PROMOTIONS"])) is False
+    for rule in default_rules():
+        fields = {c.field for c in rule.match}
+        assert not (fields & {"label"} and rule.action is Action.keep), rule.id
+
+
+def test_gmail_categories_and_the_persons_own_labels_are_visble_on_a_message():
+    m = msg(label_ids=["INBOX", "CATEGORY_UPDATES", "Label_30", "Label_1"])
+    assert m.category == "updates"
+    assert set(m.own_label_ids) == {"Label_30", "Label_1"}
+    assert msg(label_ids=["INBOX"]).category is None
 
 
 # ---- minting rules from a reviewed group -------------------------------------
