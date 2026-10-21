@@ -464,7 +464,7 @@ def rules_plan(
                                            "subject": m.subject, "from": m.from_addr} for i, m in rows]},
                               indent=2, default=str))
         return
-    typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))  from {plan.query}", bold=True)
+    typer.secho(f"plan {plan.id}  ({len(plan.items):,} item(s))  from {plan.query}", bold=True)
     for action, n in sorted(counts.items()):
         typer.echo(f"  {action:<10} {n:,}")
     typer.echo()
