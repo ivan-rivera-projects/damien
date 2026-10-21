@@ -10,7 +10,7 @@ from damien.stakes import protected_label, stake_floor
 
 def a_message(subject: str, **kw) -> Message:
     base = {"id": "m1", "account": "me@example.com", "subject": subject, "snippet": "", "from_addr": "a@b.example",
-            "label_ids": ["INBOX"], "internal_date": 1_700_000_000_000}
+            "label_ids": ["INBOX", "UNREAD"], "internal_date": 1_700_000_000_000}
     base.update(kw)
     return Message(**base)
 
@@ -210,3 +210,23 @@ def test_an_ordinary_receipt_still_gets_labelled_by_the_seeded_rule():
 def test_the_shipped_rules_are_marked_as_seeded():
     from damien.rules import default_rules
     assert {r.source for r in default_rules()} == {"seed"}
+
+
+def test_an_ordinary_invoice_may_still_be_labelled_a_receipt():
+    """"Invoice overdue" is an alarm; "Your invoice from Acme #1234" is a receipt.
+    One list for both is how the second stopped being filed at all."""
+    from damien.stakes import ALARM, CONSEQUENTIAL
+    assert ALARM.search("Action required: Invoice overdue")
+    assert ALARM.search("[Action required] Payment failed for invoice #IN-835")
+    assert not ALARM.search("Your invoice from Acme #1234")
+    assert CONSEQUENTIAL.search("Your invoice from Acme #1234")
+
+
+def test_an_alarm_is_held_under_every_action_but_money_only_when_it_leaves():
+    alarm = a_message("Action required: Invoice overdue")
+    receipt = a_message("Your invoice from Acme #1234")
+    for action in (Action.trash, Action.archive, Action.label):
+        assert stake_floor(alarm, action=action) is not None
+    assert stake_floor(receipt, action=Action.label) is None       # filing it is the point
+    assert stake_floor(receipt, action=Action.trash) is not None   # but it does not get thrown out
+    assert stake_floor(receipt, action=Action.archive) is not None

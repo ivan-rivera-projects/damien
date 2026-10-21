@@ -16,9 +16,20 @@ from collections.abc import Sequence
 
 from .models import Action, Message
 
-# Money, deadlines, account and legal trouble: if the subject names one of these,
-# a model's archive/trash is not allowed to stand. Erring towards `keep` costs an
-# inbox row; erring the other way costs a domain or a payment.
+# Two different risks, so two different lists.
+#
+# ALARM: the message says something is already wrong — a failure, a suspension, a
+# demand. Filing that anywhere, under any action, is losing the one mail a person
+# must see. "Action required: Invoice overdue" was being labelled Receipts.
+ALARM = re.compile(
+    r"\b(overdue|past due|unsuccessful|failed|declined|insufficient|suspend|suspended|locked|"
+    r"unauthori[sz]ed|breach|action required|final notice|terminated|rejected|disputed)\b",
+    re.IGNORECASE,
+)
+
+# CONSEQUENTIAL: money, deadlines, accounts and legal matters. A model (or a rule
+# this tool shipped) may not take one of these *out of the inbox* — but may label it,
+# because filing an ordinary invoice under Receipts is what that label is for.
 CONSEQUENTIAL = re.compile(
     r"\b(invoice|payment|paid|refund|charge|billing|past due|overdue|insufficient|declined|"
     r"expire|expires|expiring|expiry|renew|renewal|deadline|action required|"
@@ -75,7 +86,11 @@ def stake_floor(message: Message, *, machine_sent: float | None = None, importan
     """
     if protected:
         return f"the person labelled it {protected!r} themselves"
-    if CONSEQUENTIAL.search(message.subject or ""):
+    subject = message.subject or ""
+    if ALARM.search(subject):
+        return "the subject says something has already gone wrong"
+    leaves_the_inbox = action is None or action in (Action.trash, Action.archive)
+    if leaves_the_inbox and CONSEQUENTIAL.search(subject):
         return "the subject names money, a deadline or an account problem"
     # Mail the person has *opened* is mail they follow — 16 of 16 in a real inbox,
     # none of which should have been filed away. Gmail's own per-user IMPORTANT is
@@ -83,7 +98,7 @@ def stake_floor(message: Message, *, machine_sent: float | None = None, importan
     #
     # These two protect against mail *leaving the inbox* (trash, archive); they do
     # not block a label, because filing something under a name is not losing it.
-    if action in (Action.trash, Action.archive):
+    if leaves_the_inbox:
         if "UNREAD" not in message.label_ids:
             return "the person has already read it"
         if "IMPORTANT" in message.label_ids:

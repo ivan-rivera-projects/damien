@@ -140,7 +140,7 @@ def decide_message(
             if held:
                 return decision.model_copy(update={
                     "action": Action.keep, "label": None,
-                    "rationale": f"held for a person — {held} (a rule said {rule.action.value}: {rule.name})",
+                    "rationale": f"held for a person — {held} (a rule said {rule.action.value}: {rule.id})",
                 })
         return decision
     if verdict is None:
