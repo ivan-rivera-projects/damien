@@ -113,7 +113,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         confidence_ask=num("DAMIEN_CONFIDENCE_ASK", 0.55),
         header_ttl_hours=num("DAMIEN_HEADER_TTL_HOURS", 12.0),
         fetch_concurrency=int(num("DAMIEN_FETCH_CONCURRENCY", 8)),
-        max_rps=num("DAMIEN_MAX_RPS", 20.0),
+        max_rps=num("DAMIEN_MAX_RPS", 8.0),
         protect_labels=tuple(
             p.strip() for p in (env("DAMIEN_PROTECT_LABELS") or ",".join(DEFAULT_PROTECTED)).split(",") if p.strip()
         ),

@@ -47,18 +47,40 @@ class RateLimiter:
     choose instead of discovering the ceiling with a 403.
     """
 
+    FLOOR = 5.0            # never crawl: even throttled, 5/s is 1,500 units/minute
+    RECOVER_AFTER = 200    # successes before it stops being punished for one bad moment
+
     def __init__(self, rate_per_second: float):
-        self.rate = max(0.1, rate_per_second)
+        self.ceiling = max(0.1, rate_per_second)
+        self.rate = self.ceiling
+        self.floor = min(self.FLOOR, self.rate)
         self.capacity = max(1.0, self.rate)
         self._tokens = self.capacity
         self._updated = time.monotonic()
+        self._ok = 0
         self._lock = threading.Lock()
 
     def slow_down(self, factor: float = 0.5) -> None:
-        """Gmail told us we are too fast: become slower from here on."""
+        """Gmail told us we are too fast. Slower — but never into a crawl.
+
+        Halving with no floor is how a run that should take three minutes took
+        eighty: one throttled moment drove the rate to its minimum and everything
+        after it inherited that. Five a second is still 1,500 units a minute, well
+        under any ceiling, and slow enough to let a quota window clear.
+        """
         with self._lock:
-            self.rate = max(0.5, self.rate * factor)
+            self.rate = max(self.floor, self.rate * factor)
             self.capacity = max(1.0, self.rate)
+            self._ok = 0
+
+    def note_success(self) -> None:
+        """Sustained success earns the rate back, so a bad moment is not permanent."""
+        with self._lock:
+            self._ok += 1
+            if self._ok >= self.RECOVER_AFTER:
+                self._ok = 0
+                self.rate = min(self.ceiling, self.rate * 1.5)
+                self.capacity = max(1.0, self.rate)
 
     def take(self) -> float:
         """Block until one request may go. Returns the seconds waited."""
@@ -184,6 +206,7 @@ class Gmail:
                 elif resp.status_code >= 400:
                     raise GmailError(f"{method} {url} -> {resp.status_code}: {resp.text[:400]}")
                 else:
+                    self.limiter.note_success()
                     return resp.json() if resp.content else {}
             wait = _retry_after(resp) if resp is not None else None
             time.sleep(wait if wait is not None else delay + random.random() * 0.2)

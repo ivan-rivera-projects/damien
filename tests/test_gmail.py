@@ -182,3 +182,32 @@ def test_a_throttle_slows_the_client_down_for_the_rest_of_the_run(settings):
     assert g.profile()["emailAddress"] == "me@example.com"
     assert g.limiter.rate == before / 2               # it learned
     assert g.throttled == 1
+
+
+def test_the_limiter_recovers_instead_of_crawling_forever():
+    """One throttled moment must not cripple the whole run. Halving with no floor is
+    how a pass that should take three minutes took eighty: the rate hit its minimum
+    and everything after it inherited that."""
+    from damien.gmail import RateLimiter
+
+    limiter = RateLimiter(rate_per_second=40)
+    for _ in range(20):
+        limiter.slow_down()
+    assert limiter.rate == limiter.FLOOR                 # 5/s, not 0.5/s
+
+    for _ in range(200):                                 # sustained success earns it back
+        limiter.note_success()
+    assert limiter.rate > limiter.FLOOR
+
+    for _ in range(200 * 20):
+        limiter.note_success()
+    assert limiter.rate <= 40                            # but never past what was configured
+
+
+def test_the_default_pace_is_under_the_ceiling_that_tripped_gmail():
+    """20/s is 6,000 units a minute, which is what Gmail refused; the default is 8."""
+    import inspect
+
+    from damien import config
+    source = inspect.getsource(config.load_settings)
+    assert 'num("DAMIEN_MAX_RPS", 8.0)' in source
