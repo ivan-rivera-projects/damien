@@ -88,6 +88,8 @@ damien plan digest <plan-id>                        # collapse it into review gr
 damien plan apply-group <plan-id> --group 3 --token <t> --yes   # one reviewed group
 damien plan apply <plan-id> --token <t> --only archive --yes    # one action, in bulk
 damien rules from-group <plan-id> --group 3 --dry-run           # make it permanent
+damien rules plan --scope 'in:inbox after:2025/01/01 before:2026/01/01'   # a rule pass, bounded
+damien plan apply <id> --token <t> --only trash --min-confidence 0.85 --yes
 damien run list | run undo <run-id> --yes
 damien correct <message-id> --action keep --note 'a brand we follow'
 damien status | rules list | rules init
@@ -98,6 +100,39 @@ damien status | rules list | rules init
 Safe to run twice: `plan build` never writes to Gmail, an applied plan refuses to
 re-apply, a partial run resumes only the batches its journal does not hold, and
 `--only`/`--group` leave the rest of the plan approved (status `partly_applied`).
+
+## Cleaning a mailbox of a hundred thousand messages
+
+Brute force does not work and the numbers say why. Gmail's quota is charged per unit
+per minute, a header costs five units, and the first attempt to fetch a whole inbox
+throttled after 64 seconds. A paced pass over 107,710 messages would take about 90
+minutes of wall time before any judgment happened.
+
+What the mailbox actually looked like:
+
+```
+107,710  in:inbox
+ 94,202  2024 and older          <- 87% of it, historical records
+  2,256  Jan - Oct 2025          <- just over a year
+  1,717  Oct 21 - Dec 2025
+  9,536  2026
+```
+
+So the order is: **rule passes first, judgment second, and never both over the same
+messages.**
+
+| step | how | messages | cost |
+|---|---|---|---|
+| archive what a rule can describe | `rules plan --scope …` — Gmail evaluates it | tens of thousands | ~1 min, $0, no headers |
+| judge what is left and recent | `plan build -q '<a date range>'` | a few thousand | ~$0.0000256 each |
+| keep it clean | `rules from-group` on the recurring senders | — | free |
+
+`rules plan` is the important one: a rule that translates to a search is carried out
+*by Gmail*, so the only calls are the listings and the bulk writes — no headers, no
+model, no verdicts. It is why a 96,458-message pass takes a minute instead of an
+afternoon. The rule query is always wrapped in `in:inbox` unless `--scope` says
+otherwise: a bare `older_than:365d` matched 152,881 messages in this mailbox, because
+it had escaped the inbox and was reaching Sent and archived mail too.
 
 ## Where state lives
 
