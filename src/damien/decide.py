@@ -82,17 +82,21 @@ DEFAULT_SPEC = JudgementSpec(
         "fashion and streetwear: drops, lookbooks and announcements from brands he follows, "
         "and fashion production (materials, manufacturers, samples, suppliers, wholesale). "
         "He keeps music-industry mail: artists, labels, publishers, studios, engineers, "
-        "splits, masters, releases, invoices for work. A promotional email from a clothing "
-        "or music brand is still mail he wants; a discount blast from a retailer he does not "
-        "deal with is not."
+        "splits, masters, releases, invoices for work, and music-business news. "
+        "He follows artificial intelligence and technology closely and wants it in the inbox: "
+        "AI newsletters and research, model and tool releases, developer and engineering "
+        "digests, cloud and AWS updates, infrastructure and platform news. "
+        "A promotional email from a clothing or music brand is still mail he wants; a discount "
+        "blast from a retailer he does not deal with is not."
     ),
     buckets=(
         Bucket("keep", "Belongs in the inbox: written by a person, needs attention, or is fashion, "
-                       "streetwear or music-industry mail he follows", Action.keep),
+                       "streetwear, music-industry, AI or technology mail he follows", Action.keep),
         Bucket("receipt", "An automated receipt, order or confirmation for something already done",
                Action.label, "Receipts"),
-        Bucket("newsletter", "A newsletter, digest or mailing-list post he subscribed to, including a "
-                             "fashion or music one (file it, do not trash it)", Action.label, "Newsletters"),
+        Bucket("newsletter", "A newsletter or digest he subscribed to that is not about fashion, "
+                             "music, AI or technology — those belong in the inbox", Action.label,
+               "Newsletters"),
         Bucket("promotion", "A discount, sale or advertising blast from a retailer or service he "
                             "does not deal with — never a clothing or music brand he follows", Action.trash),
         Bucket("notification", "Automated notification (social, app, security, shipping) with nothing to do",

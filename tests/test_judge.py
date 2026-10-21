@@ -248,9 +248,12 @@ def test_a_changed_message_is_judged_again(settings, tmp_path):
 def test_the_spec_names_the_persons_world_and_policy():
     spec = DEFAULT_SPEC
     text = spec.context.lower()
-    for word in ("streetwear", "fashion", "music"):
+    for word in ("streetwear", "fashion", "music", "artificial intelligence", "aws"):
         assert word in text, word
     keep = next(b for b in spec.buckets if b.key == "keep")
     assert "fashion" in keep.description.lower()
+    assert "ai" in keep.description.lower()                       # AI and technology stay in the inbox
     promo = next(b for b in spec.buckets if b.key == "promotion")
     assert "brand he follows" in promo.description.lower()       # a brand he follows is never a promo
+    newsletter = next(b for b in spec.buckets if b.key == "newsletter")
+    assert "those belong in the inbox" in newsletter.description.lower()
