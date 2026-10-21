@@ -13,6 +13,15 @@ Measured on a real 200-message inbox: **0.99 s and $0.0000 to re-plan unchanged 
 **~10 s and $0.0075 to judge it for the first time**, 200 messages collapsed to ~36
 review groups, and every write applied in bulk (1,000 ids per call) and undoable.
 
+## Documentation
+
+| document | read it for |
+|---|---|
+| [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md) | the pipeline, the store, and what Damien will not do |
+| [`docs/COMMANDS.md`](docs/COMMANDS.md) | every command — when to use it, what it writes, what it costs |
+| [`docs/POLICY.md`](docs/POLICY.md) | the three layers of authority, the buckets, the rule vocabulary, and **why** each rule exists |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | the weekly and monthly passes, the failure modes, and how to take anything back |
+
 ## The pipeline
 
 ```
