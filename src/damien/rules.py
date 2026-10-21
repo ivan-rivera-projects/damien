@@ -203,15 +203,19 @@ def action_query(action: Action, label: str | None) -> str | None:
 
 
 def mint_rules(messages: Iterable[Message], action: Action, label: str | None, *,
-               max_domains: int = 5, category_share: float = 0.8) -> tuple[list[Rule], str]:
+               max_domains: int = 5, category_share: float = 0.8, min_for_category: int = 5,
+               ) -> tuple[list[Rule], str]:
     """Turn an approved group into rules that catch the same mail next time.
 
     A rule cannot say "messages that are semantically alike", so this looks for the
     strongest *deterministic* description of the group and says plainly when there
     isn't one:
 
-      * mostly one Gmail category -> a category rule, which Gmail evaluates itself
-        and which keeps working for senders you have never seen
+      * mostly one Gmail category, and enough messages to mean it -> a category rule,
+        which Gmail evaluates itself and which keeps working for senders you have
+        never seen. Never for `keep`: "keep everything Gmail calls Updates" would
+        silently switch triage off for a whole category, and a one-message group
+        would mint it from nothing.
       * otherwise, a handful of senders -> one rule per sender domain
       * neither -> no rule, and an explanation, because a wrong rule acts on mail
         the person never approved
@@ -224,7 +228,7 @@ def mint_rules(messages: Iterable[Message], action: Action, label: str | None, *
     for m in messages:
         if m.category:
             categories[m.category] = categories.get(m.category, 0) + 1
-    if categories:
+    if categories and len(messages) >= min_for_category and action is not Action.keep:
         top, count = max(categories.items(), key=lambda kv: kv[1])
         if count / len(messages) >= category_share:
             rule_id = f"auto-{top}-{action.value}"

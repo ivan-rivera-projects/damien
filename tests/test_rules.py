@@ -191,3 +191,31 @@ def test_minted_rules_carry_the_label_when_the_group_had_one():
     rules, _ = mint_rules([_m("m1", from_addr="a@news.example")], Action.label, "Newsletters")
     assert rules[0].label == "Newsletters" and rules[0].action is Action.label
     assert rules[0].source == "jev"
+
+
+def test_a_one_message_group_never_becomes_a_category_rule():
+    """A single message carries one category, so a share test would trivially pass —
+    and `CATEGORY_UPDATES -> keep` would switch triage off for every update."""
+    from damien.rules import mint_rules
+    rules, why = mint_rules([_m("m1", label_ids=["INBOX", "CATEGORY_UPDATES"],
+                                from_addr="no-reply@amazonaws.com")], Action.keep, None)
+    assert len(rules) == 1
+    assert rules[0].match[0].field == "from"                  # the sender, not the category
+    assert rules[0].match[0].value == "amazonaws.com"
+    assert "CATEGORY" not in str([r.model_dump() for r in rules])
+
+
+def test_keep_never_mints_a_category_rule_however_big_the_group():
+    from damien.rules import mint_rules
+    messages = [_m(f"m{i}", label_ids=["INBOX", "CATEGORY_UPDATES"], from_addr=f"a@x{i}.example")
+                for i in range(20)]
+    rules, _ = mint_rules(messages, Action.keep, None)
+    assert rules == [] or all(r.match[0].field == "from" for r in rules)
+
+
+def test_a_big_category_group_can_still_mint_a_category_rule_for_an_action():
+    from damien.rules import mint_rules
+    messages = [_m(f"m{i}", label_ids=["INBOX", "CATEGORY_PROMOTIONS"], from_addr=f"a@s{i}.example")
+                for i in range(9)]
+    rules, _ = mint_rules(messages, Action.label, "Promos")
+    assert len(rules) == 1 and rules[0].match[0].value == "CATEGORY_PROMOTIONS"

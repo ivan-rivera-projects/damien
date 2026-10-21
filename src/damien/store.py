@@ -297,8 +297,14 @@ class _PgConn:
     dialect = "postgres"
 
     def __init__(self, url: str):
-        import psycopg
-        from psycopg.rows import dict_row
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:                       # the other environment, missing an extra
+            raise RuntimeError(
+                "DAMIEN_DB_URL points at Postgres, but psycopg is not installed in this environment.\n"
+                "  fix: uv pip install 'psycopg[binary]'   (or: uv tool install --editable '.[pg]' --force)"
+            ) from exc
 
         self.raw = psycopg.connect(url, row_factory=dict_row)
 

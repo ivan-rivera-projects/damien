@@ -126,3 +126,26 @@ def test_protected_labels_hold_a_decision_end_to_end():
                               protected_labels=("WAITING FOR",))
     assert decision.action is Action.keep
     assert "WAITING FOR" in decision.rationale
+
+
+def test_a_rule_may_not_contradict_a_correction_from_the_same_sender():
+    """Minting is permanent, so it must not archive a sender the person keeps.
+    Exercised through the store the way the CLI does it."""
+    import tempfile
+    from pathlib import Path
+
+    from damien.store import Store
+
+    with Store(Path(tempfile.mkdtemp()) / "x.db") as store:
+        store.upsert_messages([
+            Message(id="m1", account="a", subject="Low stock alerts at LG BK", from_addr="no-reply@squareup.com"),
+            Message(id="m2", account="a", subject="Low stock alerts at LG LA", from_addr="no-reply@squareup.com"),
+        ])
+        store.correct("m1", Action.keep, note="store inventory alert")
+
+        domains = {"squareup.com"}
+        rows = list(store.conn.execute(
+            "SELECT c.message_id, c.action, m.from_addr FROM corrections c JOIN messages m ON m.id = c.message_id"))
+        conflicts = [r for r in rows
+                     if (r["from_addr"] or "").split("@")[-1] in domains and r["action"] != Action.archive.value]
+        assert len(conflicts) == 1                       # so `rules from-group` would refuse

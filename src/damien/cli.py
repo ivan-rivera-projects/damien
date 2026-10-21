@@ -33,6 +33,7 @@ from .plan import (
     approve,
     build_plan,
     digest_plan,
+    group_by_index,
     load_messages,
     sample_plan,
     undo_run,
@@ -420,6 +421,23 @@ def rules_from_group(
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1)
         messages = store.get_messages(found.message_ids)
+        # A rule makes a decision permanent, so it may not contradict the person —
+        # not in this group, and not among the senders it would capture.
+        domains = {(m.from_addr or "").split("@")[-1] for m in messages if m.from_addr}
+        rows = list(store.conn.execute(
+            """SELECT c.message_id, c.action, m.subject, m.from_addr
+                 FROM corrections c JOIN messages m ON m.id = c.message_id"""))
+        conflicts = [r for r in rows
+                     if (r["message_id"] in set(found.message_ids) or (r["from_addr"] or "").split("@")[-1] in domains)
+                     and r["action"] != found.action]
+        if conflicts:
+            shown = "; ".join(f"{(r['subject'] or '')[:40]!r} -> {r['action']}" for r in conflicts[:3])
+            typer.secho(
+                f"refusing: {len(conflicts)} message(s) from the same sender(s) were corrected to "
+                f"{conflicts[0]['action']!r}, which is not what this group says ({found.action}) — {shown}", fg="red")
+            typer.secho(
+                "a rule is permanent, so it waits until the plan agrees with you: rebuild, then mint.", dim=True)
+            raise typer.Exit(1)
 
     minted, why = mint_rules(messages, Action(found.action), found.label)
     typer.secho(f"group {group}: {len(found.message_ids)} message(s) -> {found.action}", bold=True)
