@@ -12,6 +12,7 @@ from damien.plan import (
     approve,
     build_plan,
     digest_plan,
+    group_by_index,
     load_messages,
     sample_plan,
     undo_run,
@@ -303,3 +304,33 @@ def test_the_digest_never_mixes_actions_or_labels(store: Store):
     groups = digest_plan(plan, store, similarity=0.9)
     assert len(groups) == 2                       # identical text, different answers: never merged
     assert {g.action for g in groups} == {"trash", "keep"}
+
+
+# ---- addressing and applying a single group ---------------------------------
+def test_applying_a_group_touches_only_that_group(store: Store, gmail, fake):
+    store.upsert_messages([
+        Message(id="m1", account="a", subject="promo A", from_addr="a@shop.example"),
+        Message(id="m2", account="a", subject="promo B (same kind)", from_addr="b@shop.example"),
+        Message(id="m3", account="a", subject="totally different", from_addr="c@other.example"),
+    ])
+    store.put_embeddings([("m1", "t", [1.0, 0.0]), ("m2", "t", [1.0, 0.0]), ("m3", "t", [0.0, 1.0])], "t")
+    plan = store.create_plan("a", "q", [
+        PlanItem(message_id="m1", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m2", action=Action.trash, source=Source.jev),
+        PlanItem(message_id="m3", action=Action.trash, source=Source.jev),
+    ])
+    token = approve(store, plan.id)
+    group = group_by_index(plan, store, 1, similarity=0.9)
+    assert group.message_ids == ["m1", "m2"]
+
+    run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, message_ids=group.message_ids)
+    assert run.applied == 2
+    assert fake.mods[0]["ids"] == ["m1", "m2"]
+    assert store.get_plan(plan.id).status == "partly_applied"
+
+
+def test_a_group_number_that_does_not_exist_says_so(store: Store):
+    plan = store.create_plan("a", "q", [PlanItem(message_id="m1", action=Action.trash, source=Source.jev)])
+    store.upsert_messages([Message(id="m1", account="a", subject="x")])
+    with pytest.raises(ValueError, match="run `damien plan digest"):
+        group_by_index(plan, store, 99)

@@ -148,3 +148,46 @@ def test_the_default_rules_keep_googles_personal_mail_without_asking_a_model():
     assert rule.action is Action.keep
     assert matches(rule, msg(label_ids=["INBOX", "CATEGORY_PERSONAL"])) is True
     assert matches(rule, msg(label_ids=["INBOX", "CATEGORY_PROMOTIONS"])) is False
+
+
+# ---- minting rules from a reviewed group -------------------------------------
+def _m(mid, **kw):
+    base = {"id": mid, "account": "a", "subject": "x", "from_addr": "a@shop.example", "label_ids": ["INBOX"]}
+    base.update(kw)
+    return Message(**base)
+
+
+def test_a_category_dominant_group_becomes_one_category_rule():
+    from damien.rules import mint_rules, to_query
+    messages = [_m(f"m{i}", label_ids=["INBOX", "CATEGORY_PROMOTIONS"], from_addr=f"s{i}@shop{i}.example")
+                for i in range(8)] + [_m("m9")]
+    rules, why = mint_rules(messages, Action.trash, None)
+    assert len(rules) == 1
+    assert rules[0].match[0].value == "CATEGORY_PROMOTIONS"
+    assert to_query(rules[0]) == "label:CATEGORY_PROMOTIONS"          # Gmail evaluates it, not us
+    assert "Gmail's 'promotions' category" in why
+
+
+def test_a_few_senders_become_one_rule_each():
+    from damien.rules import mint_rules
+    messages = [_m("m1", from_addr="a@dsw.com"), _m("m2", from_addr="b@dsw.com"),
+                _m("m3", from_addr="c@bestbuy.com")]
+    rules, why = mint_rules(messages, Action.trash, None)
+    assert {r.match[0].value for r in rules} == {"dsw.com", "bestbuy.com"}
+    assert all(r.action is Action.trash for r in rules)
+    assert "2 sender(s)" in why
+
+
+def test_too_many_senders_mints_nothing_and_says_why():
+    from damien.rules import mint_rules
+    messages = [_m(f"m{i}", from_addr=f"a@shop{i}.example") for i in range(12)]
+    rules, why = mint_rules(messages, Action.trash, None)
+    assert rules == []
+    assert "cannot express" in why and "12 different senders" in why
+
+
+def test_minted_rules_carry_the_label_when_the_group_had_one():
+    from damien.rules import mint_rules
+    rules, _ = mint_rules([_m("m1", from_addr="a@news.example")], Action.label, "Newsletters")
+    assert rules[0].label == "Newsletters" and rules[0].action is Action.label
+    assert rules[0].source == "jev"

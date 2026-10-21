@@ -202,6 +202,60 @@ def action_query(action: Action, label: str | None) -> str | None:
     return label if action == Action.label else None
 
 
+def mint_rules(messages: Iterable[Message], action: Action, label: str | None, *,
+               max_domains: int = 5, category_share: float = 0.8) -> tuple[list[Rule], str]:
+    """Turn an approved group into rules that catch the same mail next time.
+
+    A rule cannot say "messages that are semantically alike", so this looks for the
+    strongest *deterministic* description of the group and says plainly when there
+    isn't one:
+
+      * mostly one Gmail category -> a category rule, which Gmail evaluates itself
+        and which keeps working for senders you have never seen
+      * otherwise, a handful of senders -> one rule per sender domain
+      * neither -> no rule, and an explanation, because a wrong rule acts on mail
+        the person never approved
+    """
+    messages = list(messages)
+    if not messages:
+        return [], "the group is empty"
+
+    categories: dict[str, int] = {}
+    for m in messages:
+        if m.category:
+            categories[m.category] = categories.get(m.category, 0) + 1
+    if categories:
+        top, count = max(categories.items(), key=lambda kv: kv[1])
+        if count / len(messages) >= category_share:
+            rule_id = f"auto-{top}-{action.value}"
+            return ([Rule(
+                id=rule_id,
+                name=f"Gmail {top} -> {action.value}" + (f" '{label}'" if label else ""),
+                match=[Condition(field="label", op="contains", value=f"CATEGORY_{top.upper()}")],
+                action=action, label=label, source="jev",
+                note="minted from a reviewed plan group",
+            )], f"{count}/{len(messages)} carry Gmail's {top!r} category, so the rule is Google's own classification")
+
+    domains: list[str] = []
+    for m in messages:
+        domain = (m.from_addr or "").split("@")[-1]
+        if domain and domain not in domains:
+            domains.append(domain)
+    if domains and len(domains) <= max_domains:
+        rules = [Rule(
+            id=f"auto-from-{domain.replace('.', '-')}",
+            name=f"from {domain} -> {action.value}" + (f" '{label}'" if label else ""),
+            match=[Condition(field="from", op="contains", value=domain)],
+            action=action, label=label, source="jev",
+            note="minted from a reviewed plan group",
+        ) for domain in domains]
+        return rules, f"the group comes from {len(domains)} sender(s): {', '.join(domains)}"
+
+    return [], (f"this group spans {len(domains)} different senders "
+                f"({', '.join(domains[:6])}...), and a rule cannot express 'messages like these' "
+                f"— apply the group, or name the senders you want a rule for")
+
+
 # ---- files ------------------------------------------------------------
 def load_rules(path: Path) -> list[Rule]:
     if not path.is_file():

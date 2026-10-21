@@ -149,6 +149,20 @@ def digest_plan(plan: Plan, store: Store, *, similarity: float = DEFAULT_SIMILAR
     return groups
 
 
+def group_by_index(plan: Plan, store: Store, index: int, *, similarity: float = DEFAULT_SIMILARITY,
+                   embedder=None) -> Group:
+    """The group a person saw at position `index` (1-based) in `plan digest`.
+
+    Indices are stable for a plan and a similarity setting; changing either changes
+    them, so the error says to re-run the digest rather than acting on a guess.
+    """
+    groups = digest_plan(plan, store, similarity=similarity, embedder=embedder)
+    if index < 1 or index > len(groups):
+        raise ValueError(f"plan {plan.id} has {len(groups)} group(s) at similarity {similarity}; "
+                         f"run `damien plan digest {plan.id}` and try again")
+    return groups[index - 1]
+
+
 def _domains(messages: Sequence[Message], limit: int = 3) -> str:
     seen: list[str] = []
     for m in messages:
@@ -203,7 +217,7 @@ def approve(store: Store, plan_id: str) -> str:
 
 
 def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: bool = True,
-               only: Action | None = None) -> Run:
+               only: Action | None = None, message_ids: Sequence[str] | None = None) -> Run:
     """Execute an approved plan in bulk batches, journaling each one.
 
     Idempotent by batch index: re-running a half-finished plan with `resume`
@@ -227,9 +241,11 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
     done = {b.index for b in run.batches}
 
     label_cache = gmail.labels()
-    items = [i for i in plan.items if only is None or i.action is only]
-    if only is not None and not items:
-        raise ValueError(f"plan {plan_id} has nothing to do for action {only.value}")
+    wanted = set(message_ids) if message_ids is not None else None
+    items = [i for i in plan.items
+             if (only is None or i.action is only) and (wanted is None or i.message_id in wanted)]
+    if (only is not None or wanted is not None) and not items:
+        raise ValueError(f"plan {plan_id} has nothing to do for {only.value if only else 'those messages'}")
     groups = _group_items(items)
 
     index = 0
@@ -252,7 +268,8 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
         store.finish_run(run.id, "partial", error=str(exc)[:500])
         raise
     store.finish_run(run.id, "ok")
-    store.set_plan_status(plan.id, "partly_applied" if only is not None else "applied")
+    subset = only is not None or wanted is not None
+    store.set_plan_status(plan.id, "partly_applied" if subset else "applied")
     return store.get_run(run.id)  # type: ignore[return-value]
 
 

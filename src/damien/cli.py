@@ -37,7 +37,7 @@ from .plan import (
     sample_plan,
     undo_run,
 )
-from .rules import default_rules, load_rules, save_rules
+from .rules import default_rules, load_rules, mint_rules, save_rules
 from .store import VerdictCache, open_store
 
 app = typer.Typer(add_completion=False, help="Damien — Gmail triage: rules first, a System One model for judgment, code for every write.")
@@ -196,6 +196,46 @@ def plan_build(
     typer.echo(f"  damien plan approve {plan.id}")
 
 
+@plan_app.command("apply-group")
+def plan_apply_group(
+    plan_id: str,
+    group: int = typer.Option(..., "--group", "-g", help="The group number printed by `plan digest`."),
+    token: str = typer.Option(..., "--token"),
+    yes: bool = typer.Option(False, "--yes", help="Required: this writes to Gmail."),
+    similarity: float = typer.Option(DEFAULT_SIMILARITY, "--similarity"),
+) -> None:
+    """Apply one reviewed group — and only its messages."""
+    if not yes:
+        typer.secho("refusing to write without --yes", fg="yellow")
+        raise typer.Exit(2)
+    settings = _load()
+    with open_store(settings) as store:
+        plan = store.get_plan(plan_id)
+        if plan is None:
+            typer.secho(f"no such plan: {plan_id}", fg="red")
+            raise typer.Exit(1)
+        try:
+            found = group_by_index(plan, store, group, similarity=similarity)
+        except ValueError as exc:
+            typer.secho(str(exc), fg="red")
+            raise typer.Exit(1)
+        typer.secho(f"group {group}: {len(found.message_ids)} message(s) -> "
+                    f"{found.action}{' ' + found.label if found.label else ''}  ({found.domains})", bold=True)
+        for mid in found.message_ids[:5]:
+            [m] = store.get_messages([mid])
+            typer.echo(f"    {(m.subject or '')[:70]!r}")
+    gmail = _gmail(settings)
+    with open_store(settings) as store:
+        try:
+            run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token,
+                             message_ids=found.message_ids)
+        except (ValueError, GmailError) as exc:
+            typer.secho(str(exc), fg="red")
+            raise typer.Exit(1)
+    typer.secho(f"run {run.id} {run.status}: {run.applied} message(s) in {len(run.batches)} batch(es)", fg="green")
+    typer.secho(f"to take it back: damien run undo {run.id}", dim=True)
+
+
 @plan_app.command("digest")
 def plan_digest(
     plan_id: str,
@@ -231,10 +271,13 @@ def plan_digest(
         if group.action != current:
             current = group.action
             typer.secho(f"\n{current}", bold=True)
+        n = groups.index(group) + 1
         where = f"{group.label} · " if group.label else ""
-        typer.echo(f"  ▸ {len(group.message_ids):>4}  {where}{group.domains}")
+        typer.echo(f"  {n:>3}. {len(group.message_ids):>4}  {where}{group.domains}")
         typer.echo(f"          e.g. {group.sample_subject[:70]!r}")
     typer.secho(f"\n{len(plan.items)} message(s) → {len(groups)} decision(s)", dim=True)
+    typer.secho(f"apply one: damien plan apply-group {plan.id} --group <n> --token <t> --yes", dim=True)
+    typer.secho(f"keep it clean: damien rules from-group {plan.id} --group <n> --yes", dim=True)
 
 
 @plan_app.command("show")
@@ -354,6 +397,53 @@ def rules_init(force: bool = typer.Option(False, "--force")) -> None:
         raise typer.Exit(1)
     save_rules(path, default_rules())
     typer.secho(f"wrote {path}", fg="green")
+
+
+@rules_app.command("from-group")
+def rules_from_group(
+    plan_id: str,
+    group: int = typer.Option(..., "--group", "-g"),
+    similarity: float = typer.Option(DEFAULT_SIMILARITY, "--similarity"),
+    yes: bool = typer.Option(False, "--yes", help="Required: this writes rules.json."),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Express an approved group as rules, so this mail never needs judging again."""
+    settings = _load()
+    with open_store(settings) as store:
+        plan = store.get_plan(plan_id)
+        if plan is None:
+            typer.secho(f"no such plan: {plan_id}", fg="red")
+            raise typer.Exit(1)
+        try:
+            found = group_by_index(plan, store, group, similarity=similarity)
+        except ValueError as exc:
+            typer.secho(str(exc), fg="red")
+            raise typer.Exit(1)
+        messages = store.get_messages(found.message_ids)
+
+    minted, why = mint_rules(messages, Action(found.action), found.label)
+    typer.secho(f"group {group}: {len(found.message_ids)} message(s) -> {found.action}", bold=True)
+    typer.secho(f"  why: {why}", dim=True)
+    if not minted:
+        typer.secho("  no rule minted — nothing to write", fg="yellow")
+        raise typer.Exit(0)
+    for rule in minted:
+        from .rules import to_query
+        typer.echo(f"  + {rule.id:<28} {rule.action.value:<9} {to_query(rule) or '(matched in Python)'}")
+    if dry_run:
+        typer.secho("(dry run — nothing written)", dim=True)
+        return
+    if not yes:
+        typer.secho("refusing to write without --yes", fg="yellow")
+        raise typer.Exit(2)
+
+    path = settings.root / "rules.json"
+    existing = load_rules(path)
+    by_id = {r.id: r for r in existing}
+    for rule in minted:
+        by_id[rule.id] = rule
+    save_rules(path, list(by_id.values()))
+    typer.secho(f"wrote {len(minted)} rule(s) to {path}", fg="green")
 
 
 @rules_app.command("list")
