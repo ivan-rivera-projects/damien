@@ -62,3 +62,17 @@ def test_an_expired_sign_in_explains_the_seven_day_trap(gmail):
 def test_any_other_refresh_failure_is_still_a_readable_error(gmail):
     with pytest.raises(GmailError, match="could not refresh"):
         gmail._refresh(_DeadCreds("something new from google"))
+
+
+def test_the_version_it_reports_is_the_version_that_is_installed():
+    """A hardcoded __version__ once disagreed with the package: the tag said v0.1.1 and the
+    CLI said 0.1.0. It reads the installed metadata now, so it cannot drift."""
+    import importlib.metadata as md
+
+    import damien
+
+    try:
+        installed = md.version("damien")
+    except md.PackageNotFoundError:
+        pytest.skip("not installed (running from a bare checkout)")
+    assert damien.__version__ == installed
