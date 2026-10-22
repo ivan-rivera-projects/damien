@@ -172,9 +172,11 @@ and a partial run resumes only the batches its journal does not hold.
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | the weekly and monthly passes, failure modes, how to undo |
 | [`docs/PRIVACY.md`](docs/PRIVACY.md) | exactly what leaves your machine, and when |
 
-A `docs/SKILL-PROMPT.md` is also in there: a prompt that has an AI agent (Hermes,
-OpenClaw, anything that runs commands) create its own skill for driving this, including
-the scheduled passes below.
+Two more are for machines or reviewers rather than users: `docs/SKILL-PROMPT.md` is a prompt
+that has an AI agent (Hermes, OpenClaw, anything that runs commands) create its own skill for
+driving this, including the scheduled passes below, and `docs/AUDIT-BRIEF.md` is a brief for an
+independent reviewer — the invariants this tool promises, where each is enforced, and the
+surfaces where a defect would hide.
 
 ## Cleaning a mailbox of a hundred thousand messages
 
