@@ -91,3 +91,29 @@ def test_the_filing_setting_is_read_from_the_environment(monkeypatch, tmp_path):
 
     monkeypatch.setenv("DAMIEN_MARK_READ_WHEN_FILED", "0")
     assert load_settings().mark_read_when_filed is False
+
+
+def test_the_source_tree_can_report_its_own_version():
+    """A floor check reads `damien version`. An editable install runs this tree while carrying
+    the metadata of whenever it was installed, and reading only the metadata once stopped a
+    machine that was in fact running newer code."""
+    import re
+
+    import damien
+
+    declared = damien.source_version()
+    assert declared, "running from a checkout, pyproject.toml declares a version"
+    assert re.match(r"^\d+\.\d+", declared)
+    if damien.__version__ == declared:
+        assert damien.version_note() is None            # nothing to warn about
+    else:
+        assert "pyproject" not in (damien.version_note() or "")   # the note names the fix, not the file
+        assert "--force" in damien.version_note()
+
+
+def test_doctor_reports_the_version_it_is_actually_running(settings):
+    from damien.doctor import checks
+
+    got = {c.name: c for c in checks(settings, rules=[])}
+    assert got["version"].status in ("ok", "warn")
+    assert got["version"].detail

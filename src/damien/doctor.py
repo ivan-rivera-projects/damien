@@ -39,6 +39,14 @@ def checks(settings: Settings, *, gmail: Gmail | None = None, store=None,
     root = Path(settings.root)
 
     out.append(Check(OK, "root", str(root)))
+
+    # A floor check reads `damien version`, and an editable install can report the metadata of
+    # whenever it was installed while running this tree. Say so instead of failing a check.
+    from . import __version__, version_note
+
+    note = version_note()
+    out.append(Check(WARN if note else OK, "version",
+                     note.strip() if note else f"{__version__}"))
     env_file = root / ".env"
     out.append(Check(OK if env_file.exists() else WARN, ".env",
                      str(env_file) if env_file.exists() else "not written yet — `damien init` makes one"))

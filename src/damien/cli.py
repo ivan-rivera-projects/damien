@@ -21,7 +21,7 @@ from pathlib import Path
 
 import typer
 
-from . import __version__
+from . import __version__, version_note
 from .config import Settings, load_settings, write_env
 from .decide import DEFAULT_SPEC
 from .doctor import checks as doctor_checks
@@ -88,8 +88,11 @@ def _judge(settings: Settings, mode: str, cache=None):
 
 @app.command()
 def version() -> None:
-    """Print the version."""
+    """Print the version. A stale editable install is called out rather than hidden."""
     typer.echo(f"damien {__version__}")
+    note = version_note()
+    if note:
+        typer.echo(note)
 
 
 @app.command()
