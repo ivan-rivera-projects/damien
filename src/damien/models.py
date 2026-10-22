@@ -119,6 +119,9 @@ class Plan(BaseModel):
     status: Literal["draft", "approved", "partly_applied", "applied", "undone"] = "draft"
     token: str | None = None
     items: list[PlanItem] = Field(default_factory=list)
+    judge_usd: float = 0.0          # what this pass's model calls cost, recorded at build time
+    judge_calls: int = 0
+    judge_cached: int = 0
 
     def counts(self) -> dict[str, int]:
         out: dict[str, int] = {}

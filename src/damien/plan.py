@@ -109,6 +109,9 @@ def build_plan(
     return store.create_plan(
         account=gmail.settings.account if gmail is not None else "",
         query=query, items=items, model=model, judge=(judge.name if judge else None),
+        judge_usd=getattr(judge, "spent_usd", 0.0) or 0.0,
+        judge_calls=getattr(judge, "calls", 0) or 0,
+        judge_cached=getattr(judge, "cached", 0) or 0,
     )
 
 

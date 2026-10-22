@@ -483,3 +483,27 @@ def test_a_label_without_keep_in_inbox_still_leaves_the_inbox(store: Store, gmai
     token = approve(store, plan.id)
     apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
     assert fake.mods[-1]["removeLabelIds"] == ["INBOX"]
+
+
+def test_the_pass_records_what_its_model_calls_cost(store: Store):
+    """Cost was printed per pass and stored nowhere, so no command could total a month.
+    The plan now carries the judge's own counters, which is what `status` sums."""
+    judge = FakeJudge()
+    plan = build(store, judge=judge)
+    again = store.get_plan(plan.id)
+    assert again.judge_calls == judge.calls and judge.calls > 0
+    assert again.judge_cached == judge.cached
+    assert again.judge_usd == pytest.approx(judge.spent_usd)
+
+    summary = store.summary()
+    assert summary["judged"] == judge.calls              # the only plan so far
+    assert summary["spent_usd"].startswith("$")
+
+
+def test_a_plan_built_from_rules_costs_nothing(store: Store, gmail, fake):
+    fake.add("m1", subject="promo", sender="a@shop.example")
+    rule = Rule(id="r-1", name="shop", action=Action.trash,
+                match=[Condition(field="from", op="contains", value="shop.example")])
+    plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
+    again = store.get_plan(plan.id)
+    assert (again.judge_usd, again.judge_calls, again.judge_cached) == (0.0, 0, 0)

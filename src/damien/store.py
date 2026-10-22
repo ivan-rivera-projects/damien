@@ -77,7 +77,10 @@ CREATE TABLE IF NOT EXISTS plans (
   token TEXT,
   created_at TEXT NOT NULL,
   model TEXT,
-  judge TEXT
+  judge TEXT,
+  judge_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  judge_calls INTEGER NOT NULL DEFAULT 0,
+  judge_cached INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS plan_items (
@@ -188,7 +191,10 @@ CREATE TABLE IF NOT EXISTS plans (
   token TEXT,
   created_at TEXT NOT NULL,
   model TEXT,
-  judge TEXT
+  judge TEXT,
+  judge_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  judge_calls INTEGER NOT NULL DEFAULT 0,
+  judge_cached INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS plan_items (
@@ -344,6 +350,11 @@ class Store:
     ADDED_COLUMNS: ClassVar[dict[str, dict[str, str]]] = {
         "messages": {"list_id": "TEXT"},
         "plan_items": {"keep_in_inbox": "INTEGER NOT NULL DEFAULT 0"},
+        "plans": {
+            "judge_usd": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+            "judge_calls": "INTEGER NOT NULL DEFAULT 0",
+            "judge_cached": "INTEGER NOT NULL DEFAULT 0",
+        },
     }
 
     def __init__(self, target: Path | str):
@@ -473,11 +484,14 @@ class Store:
 
     # ---- plans --------------------------------------------------------
     def create_plan(self, account: str, query: str, items: Sequence[PlanItem], *, model: str | None = None,
-                    judge: str | None = None) -> Plan:
+                    judge: str | None = None, judge_usd: float = 0.0, judge_calls: int = 0,
+                    judge_cached: int = 0) -> Plan:
         plan = Plan(id=uuid.uuid4().hex[:12], account=account, query=query, items=list(items))
         self.conn.execute(
-            "INSERT INTO plans (id, account, query, status, token, created_at, model, judge) VALUES (?,?,?,?,?,?,?,?)",
-            (plan.id, account, query, plan.status, plan.token, _iso(plan.created_at), model, judge),
+            "INSERT INTO plans (id, account, query, status, token, created_at, model, judge,"
+            " judge_usd, judge_calls, judge_cached) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (plan.id, account, query, plan.status, plan.token, _iso(plan.created_at), model, judge,
+             float(judge_usd), int(judge_calls), int(judge_cached)),
         )
         self.conn.executemany(
             """INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence, keep_in_inbox)
@@ -499,7 +513,9 @@ class Store:
             for r in self.conn.execute("SELECT * FROM plan_items WHERE plan_id=? ORDER BY message_id", (plan_id,))
         ]
         return Plan(id=row["id"], account=row["account"], query=row["query"], status=row["status"],
-                    token=row["token"], created_at=datetime.fromisoformat(row["created_at"]), items=items)
+                    token=row["token"], created_at=datetime.fromisoformat(row["created_at"]), items=items,
+                    model=row["model"], judge=row["judge"], judge_usd=float(row["judge_usd"] or 0.0),
+                    judge_calls=int(row["judge_calls"] or 0), judge_cached=int(row["judge_cached"] or 0))
 
     def list_plans(self, limit: int = 20) -> list[Any]:
         return list(self.conn.execute("SELECT * FROM plans ORDER BY created_at DESC LIMIT ?", (limit,)))
@@ -657,12 +673,17 @@ class Store:
     # ---- reporting -----------------------------------------------------
     def summary(self) -> dict[str, int]:
         q = self.conn.execute
+        spend = q("SELECT COALESCE(SUM(judge_usd), 0) AS usd, COALESCE(SUM(judge_calls), 0) AS calls,"
+                  " COALESCE(SUM(judge_cached), 0) AS cached FROM plans").fetchone()
         return {
             "messages": q("SELECT COUNT(*) AS n FROM messages").fetchone()["n"],
             "decisions": q("SELECT COUNT(*) AS n FROM decisions").fetchone()["n"],
             "plans": q("SELECT COUNT(*) AS n FROM plans").fetchone()["n"],
             "runs": q("SELECT COUNT(*) AS n FROM runs").fetchone()["n"],
             "corrections": q("SELECT COUNT(*) AS n FROM corrections").fetchone()["n"],
+            "judged": int(spend["calls"] or 0),
+            "from_cache": int(spend["cached"] or 0),
+            "spent_usd": f"${float(spend['usd'] or 0):.4f}",
         }
 
 

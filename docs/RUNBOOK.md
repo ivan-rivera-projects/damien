@@ -64,11 +64,12 @@ plan id and the exact apply command, and the run stays useful without anyone wat
 
 One message per run, containing: the window; the counts by action; the cost of the model
 calls; the plan id; what was applied; and the command to apply what was not. `--json` on
-`rules plan` and `plan build` gives all of it except the cost, which the CLI prints at
-build time.
+`plan build` carries the counts, the calls, the cache hits and the cost; `plan show --json`
+carries what was recorded for any plan; `damien status` totals them.
 
-> **Known gap**: cost is printed per pass but not stored, so no command can tell you what
-> a month of runs cost. Persist it on the run before relying on a monthly report.
+> Cost is recorded **on the plan** at build time, so `damien status` totals every pass:
+> `judged`, `from_cache` and `spent_usd`. Only the plans built after 2026-10-21 carry it —
+> earlier ones read as zero, because nothing stored it at the time.
 
 ## When something goes wrong
 

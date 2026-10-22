@@ -311,6 +311,8 @@ def plan_show(plan_id: str, sample: int = typer.Option(20, "--sample"), json_out
     if json_out:
         typer.echo(json.dumps({"id": plan.id, "status": plan.status, "query": plan.query,
                                "counts": plan.counts(), "token": plan.token,
+                               "judge_usd": plan.judge_usd, "judge_calls": plan.judge_calls,
+                               "judge_cached": plan.judge_cached,
                                "sample": [r.__dict__ for r in rows]}, indent=2, default=str))
         return
     typer.secho(f"plan {plan.id}  status={plan.status}  query={plan.query!r}  token={plan.token or '—'}", bold=True)
