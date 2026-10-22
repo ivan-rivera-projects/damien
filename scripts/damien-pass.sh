@@ -69,6 +69,7 @@ print(f"TOTAL={sum(counts.values())}")
 print(f"CALLS={d.get('judge_calls') or 0}")
 print(f"CACHED={d.get('judge_cached') or 0}")
 print(f"USD={d.get('judge_usd') or 0}")
+print(f"ESCALATED={(d.get('stats') or {}).get('escalated') or 0}")
 PY
 )"
 
@@ -81,6 +82,11 @@ PY
 echo "  plan      $PLAN"
 echo "  found     $TOTAL message(s) — $counts_line"
 echo "  judgment  $CALLS call(s), $CACHED from cache, \$$USD"
+if [ "${ESCALATED:-0}" -gt 0 ]; then
+  # Worth reporting loudly: this is the one mode where message text reaches the judge, so a
+  # pass should say how much of it was sent.
+  echo "  bodies    $ESCALATED read, for the messages the snippet could not settle"
+fi
 
 if [ "$TOTAL" -eq 0 ]; then
   echo

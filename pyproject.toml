@@ -1,6 +1,6 @@
 [project]
 name = "damien"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Gmail triage CLI that asks before it acts: rules first, a model for the residue, and journalled, reversible writes."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -254,7 +254,10 @@ def plan_build(
         typer.echo(json.dumps({"plan": plan.id, "counts": counts,
                                "sample": [r.__dict__ for r in rows],
                                "judge_calls": calls, "judge_cached": cached_calls,
-                               "judge_usd": round(spent, 6)}, indent=2, default=str))
+                               "judge_usd": round(spent, 6),
+                               # what the pass did besides judging: messages read for
+                               # escalation, headers from cache, bodies fetched
+                               "stats": stats}, indent=2, default=str))
         return
 
     typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))", bold=True)
