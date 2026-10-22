@@ -22,10 +22,12 @@ the skill you create must point at them, not copy them, so the two cannot drift:
 Also confirm the tool is installed and working before you write the skill:
 
 ```bash
-cd /Users/riveraix/Downloads/AWS/damien && damien status
+cd /Users/riveraix/Downloads/AWS/damien && damien version && damien doctor
 ```
 
-If that fails, stop and tell me — do not invent commands.
+It must be **at least v0.3.1** and `doctor` must be green. If the version is older, the install
+needs updating before anything else; if `doctor` fails, stop and tell me — do not invent
+commands.
 
 ## What the skill must contain
 
@@ -66,8 +68,9 @@ If that fails, stop and tell me — do not invent commands.
    never applied by the schedule.
 
 7. **The report format** — one message per run: the window; counts by action; what was
-   applied; the plan id; the cost of any model calls; and the command to apply what was
-   left. If a pass failed part-way, say so and give `damien run undo <run_id>`.
+   applied; the plan id; the cost of any model calls; **the bodies read, if the pass reports
+   any** (`bodies: N read, for the messages the snippet could not settle`); and the command to
+   apply what was left. If a pass failed part-way, say so and give `damien run undo <run_id>`.
 
 8. **The never-do list** (verbatim, these are the guardrails):
    - never `--yes` an unreviewed model slice — rules and `--min-confidence 0.9` are the allowance;
@@ -79,6 +82,17 @@ If that fails, stop and tell me — do not invent commands.
 9. **The failure modes** — take the table from `RUNBOOK.md` (refused `--yes`, a plan already
    applied, a `GmailError`, a pass that stopped part-way, cost far above expectation) into
    the skill, since these are what you will hit.
+
+10. **Two settings change what a pass does. They are mine, not yours** — they live in
+    `~/.damien/.env`, and the skill must never set or change them, only explain them when a
+    report mentions them:
+    - `DAMIEN_MARK_READ_WHEN_FILED=1` — filing a message also marks it read, so what stays
+      unread is exactly what I have not dealt with yet. The pass ends its line with
+      `· filing marks read`.
+    - `DAMIEN_READ_BODIES=on_escalation` — where the snippet was not enough, the tool reads the
+      message's *newest text* and asks the judge again. **This is the only mode where message
+      text reaches a third party**, the pass always says how many bodies it read, and what it
+      read is kept on my machine. Report that count as-is; do not describe it as a failure.
 
 ## Before you schedule anything, prove the pass works
 
@@ -111,3 +125,29 @@ store itself). Use your own scheduler. Then report the result to me in the forma
 and when something needs a decision, give me the plan id and the command rather than
 deciding it yourself. If a scheduled run fails, tell me the exit reason and do not retry it
 more than once.
+
+## Updating a skill that already exists
+
+If the skill was built from an earlier copy of this file, hand your agent this:
+
+> Damien has shipped **v0.2.0 → v0.3.1** since you built this skill. Update it, in this order:
+>
+> 1. `damien version` must be **≥ 0.3.1** and `damien doctor` green. If not, update the install
+>    first (`uv tool install --editable '.[pg,vectors]' --force` from the checkout, or
+>    `pipx upgrade damien`).
+> 2. The scheduled pass now prints `bodies: N read, for the messages the snippet could not
+>    settle`, and `damien plan build --json` carries a `stats` object (`messages`, `fetched`,
+>    `cached`, `escalated`). Add both to the report format.
+> 3. Two settings of mine change what a pass does — never change them yourself, but explain
+>    them when a report shows them: `DAMIEN_MARK_READ_WHEN_FILED=1` (filing also marks read;
+>    the report ends with `· filing marks read`) and `DAMIEN_READ_BODIES=on_escalation` (it
+>    reads the newest text of mail the snippet could not settle, and reports the count — this is
+>    the only mode where text reaches a third party).
+> 4. The commands, the pass script and the schedules are **unchanged** — do not recreate them.
+> 5. Finish by running `./scripts/damien-pass.sh weekly --dry-run` and reporting it, so we both
+>    know the update took.
+
+For reference, what changed in the tool itself: **v0.2.0** made filing mark read;
+**v0.3.0** added escalation (reading the newest text where the snippet was not enough) and made
+`PRIVACY.md` state exactly what is sent; **v0.3.1** put the body count in the report and the
+stats in `--json`.
