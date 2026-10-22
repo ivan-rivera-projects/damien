@@ -275,7 +275,7 @@ def approve(store: Store, plan_id: str) -> str:
 
 def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: bool = True,
                only: Action | None = None, message_ids: Sequence[str] | None = None,
-               min_confidence: float | None = None) -> Run:
+               min_confidence: float | None = None, mark_read_when_filed: bool = False) -> Run:
     """Execute an approved plan in bulk batches, journaling each one.
 
     Idempotent by batch index: re-running a half-finished plan with `resume`
@@ -326,7 +326,7 @@ def apply_plan(*, store: Store, gmail: Gmail, plan_id: str, token: str, resume: 
                     if label_id is None and label:
                         label_id = gmail.create_label(label)
                         label_cache[label] = label_id
-                op, inverse = _perform(gmail, action, chunk, label_id, keep_in_inbox)
+                op, inverse = _perform(gmail, action, chunk, label_id, keep_in_inbox, mark_read_when_filed)
                 store.journal_batch(run.id, RunBatch(index=index, op=op, ids=chunk, label=label, inverse=inverse))
                 index += 1
     except Exception as exc:                      # journal already holds what landed
@@ -366,19 +366,29 @@ def _group_items(items: Sequence[PlanItem]) -> list[tuple[tuple[Action, str | No
 
 
 def _perform(gmail: Gmail, action: Action, ids: list[str], label_id: str | None,
-             keep_in_inbox: bool = False) -> tuple[str, dict[str, object]]:
+             keep_in_inbox: bool = False, mark_read: bool = False) -> tuple[str, dict[str, object]]:
+    """Carry out one batch and return its journal entry.
+
+    `mark_read` (from DAMIEN_MARK_READ_WHEN_FILED) is for the actions that *file* a message
+    away: archiving or labelling it out of the inbox means you have dealt with it, so it
+    stops claiming to be unread. Mail that is kept never reaches here at all — a keep is a
+    decision, not a write — so kept mail stays unread by construction. The inverse always
+    puts UNREAD back, so `run undo` restores the unread state exactly.
+    """
     if action == Action.archive:
-        gmail.archive(ids)
-        return "archive", {"add": ["INBOX"], "remove": []}
+        gmail.modify(ids, remove=["INBOX", "UNREAD"] if mark_read else ["INBOX"])
+        return "archive", {"add": ["INBOX", "UNREAD"] if mark_read else ["INBOX"], "remove": []}
     if action == Action.trash:
-        gmail.trash(ids)
+        gmail.trash(ids)                                  # trashing already drops UNREAD
         return "trash", {"add": ["INBOX", "UNREAD"], "remove": ["TRASH"]}
     if action == Action.mark_read:
         gmail.mark_read(ids)
         return "mark_read", {"add": ["UNREAD"], "remove": []}
     if action == Action.label and label_id:
-        gmail.add_label(ids, label_id, keep_in_inbox=keep_in_inbox)
-        return "label", {"add": ["INBOX"] if not keep_in_inbox else [], "remove": [label_id]}
+        gmail.add_label(ids, label_id, keep_in_inbox=keep_in_inbox,
+                        mark_read=mark_read and not keep_in_inbox)
+        return "label", {"add": (["INBOX"] if not keep_in_inbox else []) + (["UNREAD"] if mark_read and not keep_in_inbox else []),
+                         "remove": [label_id]}
     raise ValueError(f"nothing to do for action {action.value}")
 
 

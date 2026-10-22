@@ -413,6 +413,10 @@ def plan_apply(
     only: str | None = typer.Option(None, "--only", help="Apply one action of the plan: trash|archive|label|mark_read."),
     min_confidence: float | None = typer.Option(None, "--min-confidence",
                                                help="Apply only what the model was sure about (rules and your own decisions always pass)."),
+    mark_read_when_filed: bool | None = typer.Option(
+        None, "--mark-read-when-filed/--no-mark-read-when-filed",
+        help="Filing a message (archiving, labelling it out of the inbox) also marks it read, "
+             "so unread keeps meaning 'not looked at yet'. Defaults to DAMIEN_MARK_READ_WHEN_FILED."),
 ) -> None:
     """Apply an approved plan, in bulk batches, journalling every one.
 
@@ -431,16 +435,20 @@ def plan_apply(
             raise typer.Exit(2) from None
     settings = _load()
     gmail = _gmail(settings)
+    filing_marks_read = (settings.mark_read_when_filed if mark_read_when_filed is None
+                         else mark_read_when_filed)
     with open_store(settings) as store:
         try:
             run = apply_plan(store=store, gmail=gmail, plan_id=plan_id, token=token, only=parsed_only,
-                             min_confidence=min_confidence)
+                             min_confidence=min_confidence, mark_read_when_filed=filing_marks_read)
         except (ValueError, GmailError) as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1) from exc
     slice_note = f" ({parsed_only.value} slice)" if parsed_only else ""
     if min_confidence is not None:
         slice_note += f" at confidence >= {min_confidence}"
+    if filing_marks_read:
+        slice_note += " · filing marks read"
     typer.secho(f"run {run.id} {run.status}: {run.applied} message(s) in {len(run.batches)} batch(es){slice_note}", fg="green")
     if parsed_only:
         typer.secho("the rest of the plan is still approved", dim=True)

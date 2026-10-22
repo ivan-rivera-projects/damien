@@ -342,8 +342,14 @@ class Gmail:
     def mark_read(self, ids: Sequence[str]) -> int:
         return self.modify(ids, remove=["UNREAD"])
 
-    def add_label(self, ids: Sequence[str], label_id: str, *, keep_in_inbox: bool = False) -> int:
-        return self.modify(ids, add=[label_id], remove=[] if keep_in_inbox else ["INBOX"])
+    def add_label(self, ids: Sequence[str], label_id: str, *, keep_in_inbox: bool = False,
+                  mark_read: bool = False) -> int:
+        """Label in bulk. `keep_in_inbox` leaves it in the inbox; `mark_read` drops UNREAD
+        (they are mutually exclusive in practice: something you keep unread is not filed)."""
+        remove: list[str] = [] if keep_in_inbox else ["INBOX"]
+        if mark_read and not keep_in_inbox:
+            remove.append("UNREAD")
+        return self.modify(ids, add=[label_id], remove=remove)
 
 
 THROTTLE_MARKS = ("Quota exceeded", "rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED",

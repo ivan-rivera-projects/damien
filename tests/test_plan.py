@@ -508,3 +508,63 @@ def test_a_plan_built_from_rules_costs_nothing(store: Store, gmail, fake):
     plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
     again = store.get_plan(plan.id)
     assert (again.judge_usd, again.judge_calls, again.judge_cached) == (0.0, 0, 0)
+
+
+def test_filing_marks_read_when_asked_and_undo_puts_unread_back(store: Store, gmail, fake):
+    """Filing a message away means you have dealt with it, so it stops claiming to be
+    unread. `unread` then means 'not looked at yet' — and run undo restores it from the
+    journal, because the inverse always carries UNREAD back."""
+    fake.add("m1", subject="promo", sender="a@shop.example", labels=["INBOX", "UNREAD"])
+    rule = Rule(id="r-shop", name="shop", action=Action.archive,
+                match=[Condition(field="from", op="contains", value="shop.example")])
+    plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
+    token = approve(store, plan.id)
+
+    run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, mark_read_when_filed=True)
+    assert sorted(fake.mods[-1]["removeLabelIds"]) == ["INBOX", "UNREAD"]
+    assert "UNREAD" in run.batches[0].inverse["add"]          # the journal can put it back
+
+    undo_run(store=store, gmail=gmail, run_id=run.id)
+    assert "UNREAD" in fake.mods[-1]["addLabelIds"]            # unread, restored
+
+
+def test_filing_without_the_flag_leaves_unread_alone(store: Store, gmail, fake):
+    """The default must not change: a user who wants archived mail to stay unread gets that."""
+    fake.add("m1", subject="promo", sender="a@shop.example", labels=["INBOX", "UNREAD"])
+    rule = Rule(id="r-shop", name="shop", action=Action.archive,
+                match=[Condition(field="from", op="contains", value="shop.example")])
+    plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
+    token = approve(store, plan.id)
+    apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
+    assert fake.mods[-1]["removeLabelIds"] == ["INBOX"]
+
+
+def test_kept_mail_is_never_marked_read(store: Store, gmail, fake):
+    """A keep is a decision, not a write — so it cannot be affected by this at all."""
+    rule = Rule(id="r-shop", name="shop", action=Action.archive,
+                match=[Condition(field="from", op="contains", value="deals@shop.example")])
+    plan = build(store, rules=[rule], judge=FakeJudge())
+    kept = {i.message_id for i in plan.items if i.action is Action.keep}
+    assert kept                                                # this plan both files and keeps
+
+    token = approve(store, plan.id)
+    apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, mark_read_when_filed=True)
+    touched = {mid for body in fake.mods for mid in body["ids"]}
+    assert kept and not (kept & touched)
+    assert any("UNREAD" in b["removeLabelIds"] for b in fake.mods)   # the filed one was marked read
+
+
+def test_a_label_that_keeps_it_in_the_inbox_does_not_mark_it_read(store: Store, gmail, fake):
+    """The Promotions-tab case: the message stays in the inbox, so it must stay unread —
+    marking it read would hide new mail from the person it was kept for."""
+    fake.labels["CATEGORY_PROMOTIONS"] = "CATEGORY_PROMOTIONS"
+    fake.add("m1", subject="marketing", sender="seller@sell.amazon.com", labels=["INBOX", "UNREAD"])
+    rule = Rule(id="r-seller", name="promotions", action=Action.label, label="CATEGORY_PROMOTIONS",
+                keep_in_inbox=True,
+                match=[Condition(field="from", op="contains", value="sell.amazon.com")])
+    plan = plan_from_rules(store=store, gmail=gmail, rules=[rule], sample=0)
+    token = approve(store, plan.id)
+    apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, mark_read_when_filed=True)
+    body = fake.mods[-1]
+    assert body["addLabelIds"] == ["CATEGORY_PROMOTIONS"]
+    assert body["removeLabelIds"] == []                        # neither INBOX nor UNREAD

@@ -76,3 +76,18 @@ def test_the_version_it_reports_is_the_version_that_is_installed():
     except md.PackageNotFoundError:
         pytest.skip("not installed (running from a bare checkout)")
     assert damien.__version__ == installed
+
+
+def test_the_filing_setting_is_read_from_the_environment(monkeypatch, tmp_path):
+    """It was in the template and in the dataclass but never read from the environment, so
+    DAMIEN_MARK_READ_WHEN_FILED=1 silently did nothing. Settings is the only place that can
+    be wrong, so it is what gets asserted."""
+    from damien.config import load_settings
+
+    (tmp_path / ".env").write_text("DAMIEN_MARK_READ_WHEN_FILED=1\n")
+    monkeypatch.setenv("DAMIEN_HOME", str(tmp_path))
+    monkeypatch.delenv("DAMIEN_MARK_READ_WHEN_FILED", raising=False)
+    assert load_settings().mark_read_when_filed is True
+
+    monkeypatch.setenv("DAMIEN_MARK_READ_WHEN_FILED", "0")
+    assert load_settings().mark_read_when_filed is False

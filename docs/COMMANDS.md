@@ -91,6 +91,7 @@ decision per group instead of per message, biggest first.
 damien plan approve <plan_id>
 damien plan apply <plan_id> --token <t> --yes --only trash
 damien plan apply <plan_id> --token <t> --yes --min-confidence 0.9
+damien plan apply <plan_id> --token <t> --yes --mark-read-when-filed
 damien plan apply-group <plan_id> -g 3 --token <t> --yes
 ```
 
@@ -99,6 +100,11 @@ damien plan apply-group <plan_id> -g 3 --token <t> --yes
   read and applied a slice at a time.
 - `--min-confidence` applies only what the model was sure about. Rules and your own
   decisions always pass, whatever the threshold.
+- `--mark-read-when-filed` (or `DAMIEN_MARK_READ_WHEN_FILED=1`) makes *filing* a message —
+  archiving it, or labelling it out of the inbox — also drop `UNREAD`, so "unread" keeps
+  meaning *you have not looked at this yet*. Mail that is **kept** is never touched by it,
+  because a keep is a decision, not a write. The journal carries `UNREAD` back, so `run undo`
+  restores the unread state exactly.
 - `--yes` is required and is the point: no command writes to Gmail without it.
 
 An already-applied plan is refused; undo its run first.

@@ -40,6 +40,10 @@ OPENROUTER_API_KEY=
 
 # Labels the model may never act against: anything carrying one is kept.
 DAMIEN_PROTECT_LABELS=ACTION REQUIRED,WAITING FOR,Bills
+
+# 1 = filing a message (archiving it, labelling it out of the inbox) also marks it read, so
+# "unread" keeps meaning "you have not looked at this yet". Kept mail is never touched.
+# DAMIEN_MARK_READ_WHEN_FILED=0
 """
 
 
@@ -96,10 +100,11 @@ class Settings:
     judge_batch: int              # messages per judgment call
     confidence_act: float         # >= this: act unattended
     confidence_ask: float         # < this: a person should look
-    protect_labels: tuple[str, ...]   # the person's own labels a model must not file away
+    protect_labels: tuple[str, ...]  # the person's own labels a model must not file away
     header_ttl_hours: float       # reuse stored headers younger than this (0 = always refetch)
     fetch_concurrency: int        # parallel Gmail metadata calls
     max_rps: float                # ceiling on Gmail requests/second (quota is per minute)
+    mark_read_when_filed: bool = False  # filing also drops UNREAD, so unread means "not looked at"
 
     def redacted(self) -> dict[str, object]:
         d = dict(self.__dict__)
@@ -154,4 +159,5 @@ def load_settings(env_file: Path | None = None) -> Settings:
         protect_labels=tuple(
             p.strip() for p in (env("DAMIEN_PROTECT_LABELS") or ",".join(DEFAULT_PROTECTED)).split(",") if p.strip()
         ),
+        mark_read_when_filed=env("DAMIEN_MARK_READ_WHEN_FILED").lower() in ("1", "true", "yes", "on"),
     )

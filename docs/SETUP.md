@@ -115,6 +115,7 @@ DAMIEN_ACCOUNT=you@gmail.com
 DAMIEN_JUDGE=rules
 DAMIEN_MODEL=typesafe/jev-1.13
 OPENROUTER_API_KEY=
+DAMIEN_MARK_READ_WHEN_FILED=0     # 1 = filing also marks read, so unread means "not looked at"
 ```
 
 ## 4. Set up your own policy
