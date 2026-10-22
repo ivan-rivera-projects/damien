@@ -84,3 +84,13 @@ def test_the_escalated_answer_is_a_different_cache_key(settings):
     plain = Message(id="m1", account="a", subject="s", snippet="snip")
     with_body = Message(id="m1", account="a", subject="s", snippet="snip", body="the text")
     assert judge.verdict_key(plain, "", None) != judge.verdict_key(with_body, "", None)
+
+
+def test_the_plan_records_which_mode_it_read_bodies_in(store: Store, gmail, fake):
+    """So a wrapper never has to infer it: 'we read nothing' and 'reading is off' must not
+    look alike in a report."""
+    judge = BodyAwareJudge()
+    _, off = a_plan(store, gmail, fake, judge, read_bodies="off")
+    assert off["read_bodies"] == "off"
+    _, on = a_plan(store, gmail, fake, judge, read_bodies="on_escalation")
+    assert on["read_bodies"] == "on_escalation"

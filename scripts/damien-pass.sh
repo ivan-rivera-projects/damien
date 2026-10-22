@@ -69,7 +69,9 @@ print(f"TOTAL={sum(counts.values())}")
 print(f"CALLS={d.get('judge_calls') or 0}")
 print(f"CACHED={d.get('judge_cached') or 0}")
 print(f"USD={d.get('judge_usd') or 0}")
-print(f"ESCALATED={(d.get('stats') or {}).get('escalated') or 0}")
+_stats = d.get("stats") or {}
+print(f"ESCALATED={_stats.get('escalated') or 0}")
+print(f"READ_BODIES={_stats.get('read_bodies') or 'off'}")
 PY
 )"
 
@@ -82,10 +84,16 @@ PY
 echo "  plan      $PLAN"
 echo "  found     $TOTAL message(s) — $counts_line"
 echo "  judgment  $CALLS call(s), $CACHED from cache, \$$USD"
-if [ "${ESCALATED:-0}" -gt 0 ]; then
-  # Worth reporting loudly: this is the one mode where message text reaches the judge, so a
-  # pass should say how much of it was sent.
-  echo "  bodies    $ESCALATED read, for the messages the snippet could not settle"
+# Always say something about bodies: this is the one mode where message text reaches the
+# judge, so "nothing was read" and "reading is off" must not look alike.
+if [ "${READ_BODIES:-off}" = "on_escalation" ]; then
+  if [ "${ESCALATED:-0}" -gt 0 ]; then
+    echo "  bodies    $ESCALATED read, for the messages the snippet could not settle"
+  else
+    echo "  bodies    0 read — nothing needed it"
+  fi
+else
+  echo "  bodies    not read (DAMIEN_READ_BODIES=off)"
 fi
 
 if [ "$TOTAL" -eq 0 ]; then

@@ -94,6 +94,8 @@ def build_plan(
         stats["messages"] = len(messages)
         stats["fetched"] = fetched
         stats["cached"] = len(messages) - fetched
+        # recorded whether or not escalation runs: a report must not have to infer it
+        stats["read_bodies"] = read_bodies
 
     label_names = gmail.labels() if gmail is not None else None
     decisions = decide_all(messages, rules=rules, judge=judge, spec=spec, batch_size=judge_batch,

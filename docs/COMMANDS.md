@@ -82,6 +82,10 @@ text reaches the judge — see `PRIVACY.md` — and the plan reports how many it
   bodies:  12 read, for the messages the snippet could not settle
 ```
 
+A pass always says something about bodies, so that "nothing needed reading" and "reading is
+off" are never mistaken for each other: `bodies: 0 read — nothing needed it`, or
+`bodies: not read (DAMIEN_READ_BODIES=off)`.
+
 ## Reading a plan before it acts
 
 ```bash

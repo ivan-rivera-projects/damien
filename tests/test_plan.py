@@ -211,7 +211,7 @@ def test_build_plan_reports_what_came_from_cache(store: Store, gmail, fake):
     stats: dict[str, int] = {}
     plan = build_plan(store=store, gmail=gmail, rules=[], judge=FakeJudge(), query="in:inbox",
                       limit=None, stats=stats)
-    assert stats == {"messages": 3, "fetched": 0, "cached": 3}
+    assert stats == {"messages": 3, "fetched": 0, "cached": 3, "read_bodies": "off"}
     assert len(plan.items) == 3
 
 

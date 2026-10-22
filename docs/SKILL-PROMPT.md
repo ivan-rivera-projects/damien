@@ -68,9 +68,11 @@ commands.
    never applied by the schedule.
 
 7. **The report format** — one message per run: the window; counts by action; what was
-   applied; the plan id; the cost of any model calls; **the bodies read, if the pass reports
-   any** (`bodies: N read, for the messages the snippet could not settle`); and the command to
-   apply what was left. If a pass failed part-way, say so and give `damien run undo <run_id>`.
+   applied; the plan id; the cost of any model calls; **the bodies line, always** — the pass
+   prints `bodies: N read, for the messages the snippet could not settle`, or
+   `bodies: 0 read — nothing needed it`, or `bodies: not read (DAMIEN_READ_BODIES=off)`;
+   and the command to apply what was left. Report that line verbatim: it is the only place
+   that says whether message text left the machine. If a pass failed part-way, say so and give `damien run undo <run_id>`.
 
 8. **The never-do list** (verbatim, these are the guardrails):
    - never `--yes` an unreviewed model slice — rules and `--min-confidence 0.9` are the allowance;
