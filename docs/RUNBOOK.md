@@ -110,7 +110,9 @@ damien rules list        # how many rules, how many are Gmail-evaluable, and any
 2. **Never edit the spec or the buckets.** That is a deliberate, expensive, by-hand change.
 3. **Never widen a `--scope` silently.** A scope that loses `in:inbox` reaches Sent and
    Archive.
-4. **Never send mail.** There is no send scope, and there is no command that would.
+4. **Never send mail.** No code path sends and no command does — but the token's scope
+   permits composing and sending, so treat `~/.damien/token.json` as a live credential and
+   never widen the scope.
 5. **Never `--yes` without a plan id you just built.** The token belongs to one plan.
 
 ## Steps

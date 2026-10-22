@@ -73,7 +73,7 @@ If that fails, stop and tell me — do not invent commands.
    - never `--yes` an unreviewed model slice — rules and `--min-confidence 0.9` are the allowance;
    - never edit the buckets in `src/damien/decide.py` — that invalidates the verdict cache and re-judges everything (≈$0.17);
    - never widen a `--scope` past `in:inbox` — a scope without it reaches Sent and Archive;
-   - never attempt to send mail — Damien has no send scope and no such command;
+   - never attempt to send mail — no code path sends, but the token's scope could, so never widen the scope and never hand the token to another tool;
    - never involve CONSPIRE, its MCP tools, its ledger or its gateway — this is my personal inbox and nothing about it belongs in a workspace.
 
 9. **The failure modes** — take the table from `RUNBOOK.md` (refused `--yes`, a plan already

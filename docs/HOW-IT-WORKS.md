@@ -76,15 +76,24 @@ for:
 | `message_embeddings` | vectors, used only to group a plan for review |
 
 Gmail credentials are `credentials.json` (the OAuth desktop client) and `token.json`
-(written by `damien login`). The only scope requested is
-`https://www.googleapis.com/auth/gmail.modify` — read, label, archive and trash. Damien
-never sends, never deletes permanently, and never touches Drive, Calendar or Contacts.
+(written by `damien login`). The scope requested is
+`https://www.googleapis.com/auth/gmail.modify` — read, label, archive and trash. It cannot
+delete permanently, and it grants nothing in Drive, Calendar or Tasks. Google's description
+of that scope also includes composing and sending, which no code path here uses: the token
+is a credential, and treat it like one.
 
 ## What Damien will not do
 
 - **Delete anything permanently.** `trash` moves a message to the Trash label, which
-  Gmail clears after thirty days. The window is the undo.
-- **Send mail.** There is no send scope.
+  Gmail clears after thirty days. The window is the undo. The scope cannot do more: Google
+  says `gmail.modify` "does not allow immediate, permanent deletion of threads and
+  messages, bypassing the trash".
+- **Send mail.** No code path sends and no command does. The scope is a different matter —
+  Google describes `gmail.modify` as "read, compose, and send emails", so the token file is
+  a credential that *could* send even though nothing here does. That is why it lives at
+  0600 in `~/.damien`, and why the scope is not widened.
+- **Touch Drive, Calendar or Tasks.** Those are separate APIs with separate scopes; this
+  token grants nothing in any of them.
 - **Write without a token.** `plan apply` refuses without the token minted by
   `plan approve`, and refuses a second time on a plan already applied.
 - **Judge a message twice for the same spec.** The verdict cache is keyed on it.
