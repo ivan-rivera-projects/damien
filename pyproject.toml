@@ -1,6 +1,6 @@
 [project]
 name = "damien"
-version = "0.1.2"
+version = "0.1.3"
 description = "A Gmail triage CLI that asks before it acts: rules first, a model for the residue, and journalled, reversible writes."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,3 +53,19 @@ packages = ["src/damien"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 140
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "RUF"]
+# E501: the CLI's help text and the docs read as prose, and wrapping them hurts more than it
+# helps. UP042: `str, Enum` is deliberate — it serialises predictably to the JSON that ends up
+# in the store. RUF002: em-dashes and × are intentional in prose.
+ignore = ["E501", "UP042", "RUF002"]
+
+[tool.ruff.lint.per-file-ignores]
+# typer's API is Option()/Argument() in defaults; B008 is wrong for it.
+"src/damien/cli.py" = ["B008"]

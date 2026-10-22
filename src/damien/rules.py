@@ -273,8 +273,8 @@ def shadowed(rules: Iterable[Rule]) -> list[tuple[Rule, Rule]]:
     sender = [(i, r) for i, r in enumerate(ordered)
               if r.enabled and r.match and r.match[0].field == "from" and r.match[0].op == "contains"]
     out: list[tuple[Rule, Rule]] = []
-    for pos, (i, broad) in enumerate(sender):
-        for j, narrow in sender[pos + 1:]:
+    for pos, (_i, broad) in enumerate(sender):
+        for _j, narrow in sender[pos + 1:]:
             b, n = str(broad.match[0].value).lower(), str(narrow.match[0].value).lower()
             if b != n and n.endswith(b) and broad.action is not narrow.action:
                 out.append((broad, narrow))

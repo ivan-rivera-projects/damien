@@ -128,7 +128,6 @@ class Gmail:
             return self._creds
         if not self.settings.token_path.is_file():
             raise GmailError("not signed in — run `damien login`")
-        from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
 
         creds = Credentials.from_authorized_user_file(str(self.settings.token_path), list(self.settings.scopes))
@@ -249,7 +248,7 @@ class Gmail:
         """id -> name for every label; small, cached for the process."""
         if self._label_names is None or refresh:
             data = self._request("GET", f"{API}/labels")
-            self._label_names = {l["id"]: l.get("name", l["id"]) for l in data.get("labels", [])}
+            self._label_names = {label["id"]: label.get("name", label["id"]) for label in data.get("labels", [])}
         return self._label_names
 
     def label_id(self, name: str) -> str | None:

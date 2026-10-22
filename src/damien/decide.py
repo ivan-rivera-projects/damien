@@ -207,7 +207,7 @@ def decide_all(
         # A judge answers one message per message, in order. Re-keying by the verdict's
         # own message_id looked safer and was not: it silently dropped 2,180 decisions
         # to "no judgment was made" whenever two messages shared a cache key.
-        by_position = dict(zip((m.id for m in chunk), verdicts))
+        by_position = dict(zip((m.id for m in chunk), verdicts, strict=False))
         for message in chunk:
             decisions.append(decide_message(message, rules=(), verdict=by_position.get(message.id), spec=spec,
                                             label_names=label_names, model=model, protected_labels=protected_labels))

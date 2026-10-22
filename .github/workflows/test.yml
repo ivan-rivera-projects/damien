@@ -22,6 +22,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
+      - name: lint
+        run: |
+          pip install ruff
+          ruff check .            # the standard lives in pyproject.toml
       - name: test
         # The Postgres half of the store matrix skips itself when DAMIEN_TEST_DB_URL is
         # unset, so the suite runs on SQLite alone here. To cover both dialects in CI,

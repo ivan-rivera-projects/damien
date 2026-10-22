@@ -60,7 +60,7 @@ class Embedder:
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
@@ -120,9 +120,9 @@ def _cluster_python(items, similarity) -> list[list[str]]:
         if best is not None and best_sim >= similarity:
             centroid, members = groups[best]
             n = len(members) + 1
-            centroid = [(c * (n - 1) + v) / n for c, v in zip(centroid, vec)]
+            centroid = [(c * (n - 1) + v) / n for c, v in zip(centroid, vec, strict=True)]
             norm = math.sqrt(sum(c * c for c in centroid)) or 1.0
-            groups[best] = ([c / norm for c in centroid], members + [mid])
+            groups[best] = ([c / norm for c in centroid], [*members, mid])
         else:
             norm = math.sqrt(sum(v * v for v in vec)) or 1.0
             groups.append(([v / norm for v in vec], [mid]))

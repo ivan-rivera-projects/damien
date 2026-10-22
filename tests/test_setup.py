@@ -39,7 +39,7 @@ class _DeadCreds:
         self.message = message
 
     def refresh(self, request) -> None:
-        raise Exception(self.message)                     # noqa: TRY002 — mimicking google-auth
+        raise Exception(self.message)
 
 
 def test_a_deleted_oauth_client_says_what_to_do_rather_than_tracebacking(gmail):

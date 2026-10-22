@@ -95,7 +95,7 @@ def checks(settings: Settings, *, gmail: Gmail | None = None, store=None,
         if probe is None:
             try:
                 probe = Gmail(settings)
-            except Exception as exc:                      # noqa: BLE001 — reported, not raised
+            except Exception as exc:
                 out.append(Check(FAIL, "gmail reachable", f"{type(exc).__name__}: {exc}"))
                 probe = None
         if probe is not None:
@@ -115,7 +115,7 @@ def checks(settings: Settings, *, gmail: Gmail | None = None, store=None,
             with open_store(settings) as opened:
                 summary = opened.summary()
         out.append(Check(OK, "store", " · ".join(f"{k} {v}" for k, v in summary.items())))
-    except Exception as exc:                              # noqa: BLE001 — reported, not raised
+    except Exception as exc:
         out.append(Check(FAIL, "store", f"{type(exc).__name__}: {exc}"))
 
     return out

@@ -141,7 +141,7 @@ def digest_plan(plan: Plan, store: Store, *, similarity: float = DEFAULT_SIMILAR
         missing = [m for m in ids if m not in vectors]
         if missing:
             fresh = embedder.embed_messages([messages[mid] for mid in missing if mid in messages])
-            rows = [(mid, embedder.name, vec) for mid, vec in zip([m for m in missing if m in messages], fresh)]
+            rows = [(mid, embedder.name, vec) for mid, vec in zip([m for m in missing if m in messages], fresh, strict=True)]
             if rows:
                 store.put_embeddings(rows, embedder.name)
                 vectors.update({mid: vec for mid, _model, vec in rows})

@@ -166,7 +166,7 @@ class JevJudge:
         body = self._body(message_state(message, context, getattr(self, "label_names", None)), build_questions(self.spec))
         delay = 0.4
         last: Exception | None = None
-        for attempt in range(5):
+        for _attempt in range(5):
             try:
                 resp = self._client.post(self.url, headers=self._headers(), json=body)
             except httpx.HTTPError as exc:
@@ -222,7 +222,7 @@ class JevJudge:
         if todo:
             with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
                 futures = [pool.submit(self._post, m, context) for m in todo]
-                for message, future in zip(todo, futures):
+                for message, future in zip(todo, futures, strict=True):
                     try:
                         verdict = future.result()
                     except Exception as exc:              # one bad message never kills a plan

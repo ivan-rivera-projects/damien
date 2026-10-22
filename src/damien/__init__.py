@@ -1,6 +1,7 @@
 """Damien — a Gmail triage CLI that asks before it acts."""
 
-from importlib.metadata import PackageNotFoundError, version as _installed
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _installed
 
 try:
     # whatever was actually installed — one source of truth, so the version a user sees can

@@ -25,7 +25,6 @@ from . import __version__
 from .config import Settings, load_settings, write_env
 from .decide import DEFAULT_SPEC
 from .doctor import checks as doctor_checks
-from .profile import load_profile, write_profile
 from .embed import DEFAULT_SIMILARITY
 from .gmail import Gmail, GmailError
 from .jev import FakeJudge, make_judge
@@ -41,6 +40,7 @@ from .plan import (
     sample_plan,
     undo_run,
 )
+from .profile import load_profile, write_profile
 from .rules import (
     default_rules,
     load_rules,
@@ -101,7 +101,7 @@ def login() -> None:
         who = gmail.login()
     except GmailError as exc:
         typer.secho(f"login failed: {exc}", fg="red")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
     typer.secho(f"signed in as {who or 'unknown'}", fg="green")
     typer.echo(f"token stored at {settings.token_path}")
 
@@ -209,7 +209,7 @@ def scan(
                                                ttl_hours=settings.header_ttl_hours)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         store.upsert_messages(messages)
         cached = store.count_messages()
     if json_out:
@@ -242,7 +242,7 @@ def plan_build(
                               protected_labels=settings.protect_labels, model=settings.model)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         counts = plan.counts()
         rows = sample_plan(plan, store, n=show)
         spent = getattr(judge, "spent_usd", 0.0)
@@ -295,7 +295,7 @@ def plan_apply_group(
             found = group_by_index(plan, store, group, similarity=similarity)
         except ValueError as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         typer.secho(f"group {group}: {len(found.message_ids)} message(s) -> "
                     f"{found.action}{' ' + found.label if found.label else ''}  ({found.domains})", bold=True)
         for mid in found.message_ids[:5]:
@@ -308,7 +308,7 @@ def plan_apply_group(
                              message_ids=found.message_ids)
         except (ValueError, GmailError) as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
     typer.secho(f"run {run.id} {run.status}: {run.applied} message(s) in {len(run.batches)} batch(es)", fg="green")
     typer.secho(f"to take it back: damien run undo {run.id}", dim=True)
 
@@ -400,7 +400,7 @@ def plan_approve(plan_id: str) -> None:
             token = approve(store, plan_id)
         except ValueError as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
     typer.secho(f"token: {token}", bold=True)
     typer.echo(f"  damien plan apply {plan_id} --token {token} --yes")
 
@@ -428,7 +428,7 @@ def plan_apply(
             parsed_only = Action(only)
         except ValueError:
             typer.secho(f"unknown action for --only: {only}", fg="red")
-            raise typer.Exit(2)
+            raise typer.Exit(2) from None
     settings = _load()
     gmail = _gmail(settings)
     with open_store(settings) as store:
@@ -437,7 +437,7 @@ def plan_apply(
                              min_confidence=min_confidence)
         except (ValueError, GmailError) as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
     slice_note = f" ({parsed_only.value} slice)" if parsed_only else ""
     if min_confidence is not None:
         slice_note += f" at confidence >= {min_confidence}"
@@ -477,7 +477,7 @@ def run_undo(run_id: str, yes: bool = typer.Option(False, "--yes")) -> None:
             run = undo_run(store=store, gmail=gmail, run_id=run_id)
         except (ValueError, GmailError) as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
     typer.secho(f"run {run.id} {run.status}", fg="green")
 
 
@@ -523,7 +523,7 @@ def rules_plan(
                                    scope=scope)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         counts = plan.counts()
         picked = {i.message_id: i for i in plan.items[:max(sample, 1)]}
         rows = [(picked[m.id], m) for m in store.get_messages(list(picked))]
@@ -615,7 +615,7 @@ def rules_from_group(
             found = group_by_index(plan, store, group, similarity=similarity)
         except ValueError as exc:
             typer.secho(str(exc), fg="red")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from exc
         messages = store.get_messages(found.message_ids)
         # A rule makes a decision permanent, so it may not contradict the person —
         # not in this group, and not among the senders it would capture.
@@ -700,7 +700,7 @@ def restore(
         n = gmail.untrash(message_id)
     except GmailError as exc:
         typer.secho(str(exc), fg="red")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
     with open_store(settings) as store:
         for mid in message_id:
             store.correct(mid, Action.keep, note=note)
@@ -723,7 +723,7 @@ def correct(
         parsed = Action(action)
     except ValueError:
         typer.secho(f"unknown action: {action}", fg="red")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     with open_store(settings) as store:
         store.correct(message_id, parsed, label=label, note=note)
     typer.secho(f"recorded correction for {message_id}: {parsed.value}", fg="green")

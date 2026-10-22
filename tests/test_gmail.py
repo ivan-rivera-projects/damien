@@ -66,6 +66,7 @@ def test_undo_ops_are_the_inverse(gmail: Gmail, fake):
 
 def test_a_401_refreshes_once_then_succeeds(settings):
     import httpx
+
     from conftest import FakeCreds
 
     calls = {"n": 0}
@@ -106,6 +107,7 @@ def test_an_empty_query_still_means_the_inbox(gmail: Gmail, fake):
 # ---- throttling: Gmail says "too fast" with a 403, not a 429 --------------------
 def test_a_403_quota_error_is_retried_not_fatal(settings):
     import httpx
+
     from conftest import FakeCreds
 
     calls = {"n": 0}
@@ -129,6 +131,7 @@ def test_a_403_quota_error_is_retried_not_fatal(settings):
 def test_a_403_that_is_not_a_throttle_still_raises(settings):
     import httpx
     import pytest
+
     from conftest import FakeCreds
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -164,8 +167,8 @@ def test_the_rate_limiter_paces(settings):
 
 def test_a_throttle_slows_the_client_down_for_the_rest_of_the_run(settings):
     import httpx
-    from conftest import FakeCreds
 
+    from conftest import FakeCreds
     from damien.gmail import Gmail
 
     state = {"n": 0}

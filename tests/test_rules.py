@@ -135,7 +135,7 @@ def test_the_default_rules_no_longer_blanket_label_every_mailing_list():
         assert "list_unsubscribe" not in fields or rule.action is Action.keep
 
 
-def test_gmail_categories_and_the_persons_own_labels_are_visble_on_a_message():
+def test_gmail_categories_and_the_persons_own_labels_are_visible_on_a_message():
     m = msg(label_ids=["INBOX", "CATEGORY_UPDATES", "Label_30", "Label_1"])
     assert m.category == "updates"
     assert set(m.own_label_ids) == {"Label_30", "Label_1"}
@@ -151,13 +151,6 @@ def test_the_default_rules_do_not_short_circuit_on_a_gmail_category():
     for rule in default_rules():
         fields = {c.field for c in rule.match}
         assert not (fields & {"label"} and rule.action is Action.keep), rule.id
-
-
-def test_gmail_categories_and_the_persons_own_labels_are_visble_on_a_message():
-    m = msg(label_ids=["INBOX", "CATEGORY_UPDATES", "Label_30", "Label_1"])
-    assert m.category == "updates"
-    assert set(m.own_label_ids) == {"Label_30", "Label_1"}
-    assert msg(label_ids=["INBOX"]).category is None
 
 
 # ---- minting rules from a reviewed group -------------------------------------
@@ -207,7 +200,7 @@ def test_a_one_message_group_never_becomes_a_category_rule():
     """A single message carries one category, so a share test would trivially pass —
     and `CATEGORY_UPDATES -> keep` would switch triage off for every update."""
     from damien.rules import mint_rules
-    rules, why = mint_rules([_m("m1", label_ids=["INBOX", "CATEGORY_UPDATES"],
+    rules, _why = mint_rules([_m("m1", label_ids=["INBOX", "CATEGORY_UPDATES"],
                                 from_addr="no-reply@amazonaws.com")], Action.keep, None)
     assert len(rules) == 1
     assert rules[0].match[0].field == "from"                  # the sender, not the category

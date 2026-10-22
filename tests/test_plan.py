@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from damien.decide import DEFAULT_SPEC
+from damien.gmail import GmailError
 from damien.jev import FakeJudge
 from damien.models import Action, Message, PlanItem, Source
 from damien.plan import (
@@ -122,7 +123,7 @@ def test_a_partial_run_stays_resumable_and_replays_nothing(store: Store, gmail, 
     token = approve(store, plan.id)
 
     fake.fail_mods = 1                                           # the first batch dies
-    with pytest.raises(Exception):
+    with pytest.raises(GmailError):                              # a failed batch, specifically
         apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token)
 
     assert store.get_plan(plan.id).status == "approved"           # not "applied" — nothing was finished
@@ -206,7 +207,7 @@ def test_build_plan_reports_what_came_from_cache(store: Store, gmail, fake):
     for i in range(3):
         fake.add(f"m{i}")
     ids = gmail.list_ids("in:inbox")
-    messages, _ = load_messages(store=store, gmail=gmail, ids=ids)   # warm the cache
+    _messages, _ = load_messages(store=store, gmail=gmail, ids=ids)   # warm the cache
     stats: dict[str, int] = {}
     plan = build_plan(store=store, gmail=gmail, rules=[], judge=FakeJudge(), query="in:inbox",
                       limit=None, stats=stats)
@@ -275,7 +276,7 @@ def test_similar_messages_collapse_into_one_group(store: Store):
     trashes = [g for g in groups if g.action == "trash"]
     assert len(trashes) == 1 and len(trashes[0].message_ids) == 2
     assert "dsw.com" in trashes[0].domains
-    receipts = [g for g in groups if g.action == "label"][0]
+    receipts = next(g for g in groups if g.action == "label")
     assert receipts.label == "Receipts" and len(receipts.message_ids) == 2
 
 
