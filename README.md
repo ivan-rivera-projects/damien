@@ -1,121 +1,175 @@
-# Damien
+<div align="center">
 
-**A Gmail triage CLI that asks before it acts.** Rules decide what they can, a model judges
-the residue, and code performs every write — in bulk, journalled, and reversible.
+# 📺 DAMIEN 📺
+
+### ★ THE INBOX CLEANER THAT *ASKS FIRST!* ★
+
+*As seen on your terminal!*
 
 [![tests](https://github.com/ivan-rivera-projects/damien/actions/workflows/test.yml/badge.svg)](https://github.com/ivan-rivera-projects/damien/actions/workflows/test.yml)
+[![PyPI](https://img.shields.io/pypi/v/damien)](https://pypi.org/project/damien/)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 
-It was built to answer one question honestly: *can a mailbox of a hundred thousand
-messages be put in order by software you would actually leave alone with your mail?*
+</div>
 
-## Why it is different
+---
 
-- **It never acts on mail you have not read.** A plan is a document. Applying one takes an
-  approval token — printed once by `plan approve`, stored only as a hash — and
-  `--only <action>` applies exactly the slice you looked at.
-- **Every write is reversible.** Each batch is journalled as `pending` *before* it reaches
-  Gmail and marked `done` after, so `run undo` puts back the state each message had when the
-  plan was built (inbox, unread, label). `trash` is a label and
-  Gmail holds it 30 days; there is no permanent-delete path in the code or the scope.
-- **Rules run first, and they are free.** A rule that maps onto Gmail search syntax is
-  executed *by Gmail* — no listings, no headers, no model. On a settled mailbox a pass
-  costs **$0**.
-- **The model only ever sees what your rules could not settle** — headers and a snippet —
-  and every answer is cached, so a message is never paid for twice. It reads the *text* only
-  if you ask it to (`DAMIEN_READ_BODIES=on_escalation`), only for the messages the snippet
-  could not settle, and never an attachment.
-- **Your keys, your credential, nothing in the middle.** No server, no account here, no
-  telemetry. Run it with no model at all if you like (`DAMIEN_JUDGE=rules`).
-- **It does not send.** There is no send *path*: no code in Damien sends, drafts-and-sends,
-  or forwards (the `gmail.modify` scope technically permits sending; Damien never calls it).
+> 🎙️ *\[ANNOUNCER, in a voice that has sold a million steak knives\]*
 
-## What it did on a real mailbox
+## ARE YOU TIRED OF THIS?
 
-One Gmail account, used daily, 107,710 messages in the inbox when this started. Every figure
-below is measured by the tool itself, not estimated:
+*\[Black-and-white footage. A person stares at a laptop. A number climbs. They sigh at the camera.\]*
 
-| | |
-|---|---|
-| **107,710 → under 7,000** messages in the inbox | 94,202 of them were 2024 or older |
-| **101,048** messages acted on, across **29** applied runs | each one bulk, journalled, reversible |
-| **44,985** judgements by the model · **27,072** decisions by rules | rules are mined from your own corrections — and they are free |
-| **200 corrections → 68 rules**, 67 of them evaluated by Gmail itself | so 36% of all decisions now cost nothing and never drift |
-| **$0.0000449 per judgement** | ≈**$0.045 per 1,000 messages**; a 7,054-message inbox took **$0.17** and about three minutes |
-| **$0.000000** once the rules cover it | a settled pass re-decided 233 messages in **3 seconds**, 0 model calls |
-| **44,985 judgements ≈ $2.02**, best case | and many were served from cache at no cost at all |
-| a 200-message plan cold: **~10 s, $0.0075** · warm: **~1.0 s, $0.0000** | the cache key is the request, so unchanged mail is never bought twice |
+**107,710 UNREAD EMAILS.** Receipts from 2019. Newsletters you never asked for. A **"FINAL HOURS"
+SALE** that ended three presidents ago. And somewhere in that mess, buried like treasure:
+**the one email from your actual accountant.**
 
-That table is the whole argument for the architecture: **the expensive part shrinks as you
-use it**, because every class of mail you decide once becomes a rule that costs nothing
-forever. The model is the on-ramp, not the engine.
+You've tried *"Mark all as read."* 😩
+You've tried *declaring email bankruptcy.* 😫
+You've tried *one of those AI apps* that wanted your password, your data and your **firstborn.** 😱
 
-## What it looks like
+**THERE HAS TO BE A BETTER WAY!**
 
-From a real run over the author's mailbox (7,054 messages still in the inbox; 68 rules;
-about three minutes):
+---
+
+## 🌈 INTRODUCING... DAMIEN! 🌈
+
+*\[Full color. Synth stab. A terminal glows.\]*
+
+**Damien is the Gmail triage machine that runs on YOUR computer, with YOUR keys, and
+NEVER touches a single message until YOU say so!**
 
 ```
-$ damien plan build -q 'in:inbox' --show 12
+$ damien plan build -q 'in:inbox'
 plan 8f6ed799980e  (7054 item(s))
   archive    49
   keep     6825
   label      66
   trash     114
   judgment: 3709 call(s), 575 from cache, $0.1713
-  archive    jev     121d  'Clean up your report, Ivan.' <notifications@mail.creditkarma.com>
-  keep       rule    117d  'AI is making your next Apple device cost more' <theneuron@newsletter.theneurondaily.com>
-  label      Receipts jev  13d  'You accepted an AWS Marketplace offer' <no-reply@marketplace.aws>
-  trash      jev      13d  '💀 You're Not Ready for This Friday…' <support@theduabrand.com>
-
-$ damien plan approve 8f6ed799980e
-token: 1f0c…
-
-$ damien plan apply 8f6ed799980e --token 1f0c… --yes --only trash
-run 2ba1162fdb34 ok: 114 message(s) in 1 batch(es) (trash slice)
-the rest of the plan is still approved
-to take it back: damien run undo 2ba1162fdb34 --yes
 ```
 
-Nothing in Gmail changed until that last command, and `run undo 2ba1162fdb34` reverses it.
+**IT SLICES!** 🔪 Your rules sort mail first, **for free**, inside Gmail itself!
 
-## Install
+**IT DICES!** 🎲 A small decision model handles what's left, at less than **FIVE CENTS per
+THOUSAND messages!**
+
+**IT ASKS PERMISSION!** 🙋 Nothing moves until you read the plan and approve it!
+
+**AND IT PUTS IT ALL BACK!** ↩️ Every change is written to a journal *before* it happens,
+so one command undoes the lot!
+
+---
+
+## 📊 THE RESULTS ARE IN... AND THEY'RE REAL!
+
+*\[An actor in a lab coat, holding a clipboard, says "these are real numbers."\]*
+
+> 🗣️ **"My inbox went from 107,710 messages to UNDER 7,000!"**
+> *— The author's actual inbox. Measured by the tool, not by an actor.*
+
+| | |
+|---|---|
+| 📉 **107,710 → under 7,000** | messages in the inbox (94,202 of them from 2024 or older!) |
+| 📦 **101,048 messages** | sorted across 29 runs, every single one reversible |
+| 💸 **$0.045 per 1,000 messages** | a 7,054-message inbox took **$0.17** and about **three minutes** |
+| 🆓 **$0.000000** | once your rules cover it: 233 messages re-sorted in **3 seconds**, zero model calls |
+| 🧠 **200 corrections → 68 rules** | correct a kind of email once, it's free **forever** |
+
+**THAT'S RIGHT, FOLKS: THE MORE YOU USE IT, THE LESS IT COSTS!**
+Every decision you make becomes a rule, and rules are free. The model is the on-ramp,
+not the engine!
+
+---
+
+## 🚨 BUT WAIT... THERE'S MORE! 🚨
+
+*\[The announcer is now SHOUTING.\]*
+
+### 🛡️ IT WON'T TRASH YOUR MONEY MAIL!
+
+Invoices? Bank statements? **Your LLC's annual report?** Damien's guardrail **will not let the
+model** file away anything about money, deadlines, accounts or business paperwork. A person
+replying to you? **KEPT.** Something you already opened? **KEPT.** Gmail marked it important?
+**YOU GUESSED IT. KEPT!**
+
+### 🔒 IT KEEPS YOUR SECRETS!
+
+- **No server.** No account. No middleman. **No telemetry. NONE!**
+- The model sees **headers and a snippet**. That's it! It reads more only if YOU switch that on,
+  and it **never** opens an attachment.
+- Want **nothing** to leave your machine? Run it with **rules only**, or point it at a decision
+  model **you host yourself!**
+
+### 🤖 YOUR AI ASSISTANT CAN DRIVE IT!
+
+Got **OpenClaw**? Got **Hermes**? One command and your assistant knows exactly what to do:
 
 ```bash
-uvx damien --help                  # try it without installing
-pipx install damien                # or install it ('damien[pg,vectors]' for Postgres and review groups)
+damien skill install --target hermes    # or openclaw
 ```
 
-From a checkout, if you want to hack on it:
+Then it runs `damien pass weekly` every Monday, applies **only** what it's sure about, and
+**reports the rest to you.** Set it! And! **FORGET IT!** 🍗
+
+### 🧾 AND IT NEVER, EVER SENDS!
+
+There is **no send path in the code.** Damien can't send, forward or reply. Not one email.
+Not ever. **WE CHECKED!** 🔍
+
+---
+
+## 📞 OPERATORS ARE STANDING BY!
+
+*\[A phone number flashes on screen. It is actually a terminal command.\]*
+
+### CALL NOW! *(Type now.)*
 
 ```bash
-git clone https://github.com/ivan-rivera-projects/damien && cd damien
-python -m venv .venv && .venv/bin/pip install -e '.[dev]'
+uvx damien --help        # TRY IT FREE! No install!
+pipx install damien      # KEEP IT FOREVER!
 ```
 
-State lives in `~/.damien` (one SQLite file by default; set `DAMIEN_DB_URL` for Postgres).
+**\* Not available in stores. Batteries not included. Gmail account required.**
 
-## Set it up
+Then, in three easy steps:
 
-Two things are yours, and neither is shared with anyone else:
+1. **Bring your own Gmail key** 🔑: a free Google OAuth client from your own Cloud project
+   (**[docs/SETUP.md](docs/SETUP.md)** walks you through it, click by click).
+2. **Pick your judge** ⚖️: a decision model via OpenRouter, TypeSafe, one you host yourself,
+   or **none at all.**
+3. **Run the doctor** 🩺: `damien init && damien doctor`. It tells you what's missing, and
+   changes nothing!
 
-1. **A Gmail credential of your own** — a Google OAuth *desktop* client from your own
-   Cloud project, dropped at `~/.damien/credentials.json`, then `damien login`. One scope
-   (`gmail.modify`), and you can revoke it whenever you like.
-2. **A judge, or none** — any decision model with the Jev contract: `openrouter`
-   (`DAMIEN_MODEL` + `OPENROUTER_API_KEY`), `typesafe` (`TYPESAFE_API_KEY`), `local`
-   (`DAMIEN_JUDGE_URL`; nothing leaves the machine), or `DAMIEN_JUDGE=rules` to use no model
-   at all and pay nothing. `damien judge eval` then calibrates the threshold for your model.
+👉 **First time?** **[docs/FIRST-RUN.md](docs/FIRST-RUN.md)** is your first hour, in order.
 
-Then `damien init` writes your profile and a rules file, and `damien doctor` tells you
-whether anything is missing (it changes nothing).
+---
 
-→ **[`docs/SETUP.md`](docs/SETUP.md)** has the click-by-click, including the OAuth
-testing-mode trap that expires tokens weekly (it caught this project's own first
-credential). → **[`docs/FIRST-RUN.md`](docs/FIRST-RUN.md)** is the first hour, in order.
+## 📜 THE FINE PRINT
 
-## The pipeline
+*\[Tiny text scrolls past at an illegal speed. Except this time... it's GOOD NEWS.\]*
+
+<sub>
+
+**NO PERMANENT DELETE.** "Trash" means Gmail's Trash, which holds mail for 30 days. Damien has
+no code that can do more. ✦ **NO WRITE WITHOUT APPROVAL.** A plan needs a one-time token, and
+only its hash is stored. ✦ **EVERY WRITE IS UNDOABLE.** `damien run undo` puts back the inbox,
+unread and label state each message had when the plan was built. ✦ **YOUR CORRECTIONS WIN.**
+What you decide outranks every rule and every model, on every future plan. ✦ **NOTHING SENT.**
+Damien's Gmail permission (`gmail.modify`) could technically send mail. Damien never calls
+it. ✦ Results shown are from one real mailbox. Your inbox may vary. Side effects may include
+inbox zero, smug satisfaction and telling people about your email setup at parties.
+
+</sub>
+
+---
+
+## 🔧 FOR THE NERDS WATCHING AT HOME
+
+*\[The music stops. The lights come up. Okay, here's how it actually works.\]*
+
+### The pipeline
 
 ```
 scan ──► rules ──► (residue) ──► the judge ──► guardrail ──► confidence ──► plan ──► apply ──► journal
@@ -126,27 +180,25 @@ scan ──► rules ──► (residue) ──► the judge ──► guardrail
 
 1. **Rules first, and for free.** A rule that maps onto Gmail search syntax is executed *by
    Gmail*. `to_query()` returns `None` when it cannot be certain, and the rule then runs in
-   Python over listed mail — a wrong query acts on the wrong mail, so `None` is the safe
+   Python over listed mail. A wrong query acts on the wrong mail, so `None` is the safe
    direction.
-2. **Gmail's own work is trusted before ours.** Spam is never fetched. `CATEGORY_PERSONAL`
-   is kept by a rule with no model call. Gmail's category reaches the model as context.
-3. **The person's work is trusted above both.** Labels you name in
-   `DAMIEN_PROTECT_LABELS` are a floor the model cannot cross, your labels reach the model
-   as `your_labels`, and your own corrections outrank a rule and the model on every later
-   plan.
-4. **The judge sees only the residue**, as a small state (headers + snippet, never the
-   body, unless escalation is on) and *atomic* questions: which bucket, was it sent by a machine, does it want a
-   reply, how important. One request per message. The answers are kept as data, so
-   thresholds can be re-tuned without paying again.
-5. **A guardrail may only raise an action to `keep`** — never overrule you or a rule. It
-   fires on money and deadline subjects, replies from real people, mail you already read,
-   and Gmail's own `IMPORTANT`.
-6. **A confidence gate.** Below `DAMIEN_CONFIDENCE_ASK` a judgement keeps the message with
-   the reason attached: recorded, but not acted on.
-7. **Plans are read, then applied** — by group or by action, with every batch journalled
+2. **Gmail's own work is trusted before ours.** Spam and Trash are never fetched, and Gmail's
+   category reaches the model as context.
+3. **The person's work is trusted above both.** Labels you name in `DAMIEN_PROTECT_LABELS` are
+   a floor the model cannot cross, and your corrections outrank a rule and the model on every
+   later plan, in both `plan build` and the free `rules plan`.
+4. **The judge sees only the residue**: headers and a snippet (never the body unless
+   escalation is on), plus *atomic* questions: which bucket, sent by a machine?, wants a
+   reply?, how important? One request per message, and the answers are kept as data.
+5. **A guardrail may only raise an action to `keep`.** It fires on money, deadline and
+   business-admin subjects, replies from real people, mail you already read, and Gmail's own
+   `IMPORTANT`.
+6. **A confidence gate.** Below `DAMIEN_CONFIDENCE_ASK` a judgement keeps the message, with
+   the reason attached.
+7. **Plans are read, then applied**, by group or by action. Every batch is journalled
    `pending` before it lands and `done` after, so a run is resumable and undoable.
 
-## Use
+### Use
 
 ```bash
 damien doctor                                        # is everything wired up?
@@ -164,111 +216,24 @@ damien pass weekly                                   # the scheduled pass: build
 damien skill install --target openclaw              # give an agent host the Damien skill
 ```
 
-`--json` on `status`, `doctor`, `scan`, `plan build|digest|show|approve|apply|apply-group`,
-`run list|undo`, `rules list`, `correct`, `restore`, `judge eval`, `pass`.
-Safe to run twice: `plan build` never writes to Gmail, an applied plan refuses to re-apply,
-a partial run resumes only when its filter matches and only the batches its journal does not
-hold, and an undone run cannot be undone twice.
+`--json` works on `status`, `doctor`, `scan`, `plan build|digest|show|approve|apply|apply-group`,
+`run list|undo`, `rules list`, `correct`, `restore`, `judge eval` and `pass`. Every command is
+safe to run twice: `plan build` never writes to Gmail, an applied plan refuses to re-apply, a
+partial run resumes only when its filter matches, and an undone run can't be undone twice.
 
-## Documentation
+### The judge
 
-| document | read it for |
-|---|---|
-| [`docs/SETUP.md`](docs/SETUP.md) | your own Gmail credential and judge key, step by step |
-| [`docs/FIRST-RUN.md`](docs/FIRST-RUN.md) | the first hour: look, apply, learn rules, schedule |
-| [`docs/COMMANDS.md`](docs/COMMANDS.md) | every command — when to use it, what it writes, what it costs |
-| [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md) | the pipeline, the store, and what it refuses to do |
-| [`docs/POLICY.md`](docs/POLICY.md) | the layers of authority, the seven buckets, the rule vocabulary |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | the weekly and monthly passes, failure modes, how to undo |
-| [`docs/PRIVACY.md`](docs/PRIVACY.md) | exactly what leaves your machine, and when |
+Any decision model that speaks the Jev contract (a state plus typed questions in, a choice
+with a calibrated confidence out): `DAMIEN_JUDGE=openrouter` with any model on OpenRouter's
+decisions endpoint (e.g. `typesafe/jev-1.14`, `perplexity/pplx-decider-flash-v1.2`),
+`typesafe` direct, `local` (`DAMIEN_JUDGE_URL`, so nothing leaves your machine), or `rules`
+for no model at all. A backend that returns no confidence is refused.
 
-Two more are for machines or reviewers rather than users: `docs/SKILL-PROMPT.md` is a prompt
-that has an AI agent (Hermes, OpenClaw, anything that runs commands) create its own skill for
-driving this, including the scheduled passes below, and `docs/AUDIT-BRIEF.md` is a brief for an
-independent reviewer — the invariants this tool promises, where each is enforced, and the
-surfaces where a defect would hide.
-
-## Cleaning a mailbox of a hundred thousand messages
-
-Brute force does not work, and the numbers say why: a Gmail header costs quota, and a
-first attempt to fetch a whole inbox throttled after 64 seconds. A paced pass over 107,710
-messages would take ~90 minutes of wall time before any judgement happened.
-
-```
-107,710  in:inbox
- 94,202  2024 and older          <- 87% of it, historical records
-  2,256  Jan – Oct 2025
-  1,717  Oct 21 – Dec 2025
-  9,536  2026
-```
-
-So the order is: **rule passes first, judgement second, and never both over the same
-messages.**
-
-| step | how | messages | cost |
-|---|---|---|---|
-| archive what a rule can describe | `rules plan --scope …` — Gmail evaluates it | tens of thousands | ~1 min, $0, no headers |
-| judge what is left and recent | `plan build -q '<a date range>'` | a few thousand | ~$0.000046 each |
-| keep it clean | `rules from-senders` on the recurring senders | — | free |
-
-The rule query is always wrapped in `in:inbox` unless `--scope` says otherwise: a bare
-`older_than:365d` matched 152,881 messages in this mailbox because it had escaped the inbox
-and was reaching Sent and archived mail too.
-
-## Where state lives
-
-| | SQLite (default) | Postgres (`DAMIEN_DB_URL`) |
-|---|---|---|
-| setup | none — one file | one env line |
-| vectors | text column, clustered in Python | `message_embeddings` + `pgvector` |
-| tested | ✅ | ✅ in CI: Linux runners start a `postgres:17` service; macOS runs SQLite only |
-
-Tables: `messages`, `decisions`, `verdicts` (the judgement cache), `message_embeddings`,
-`plans`, `plan_items`, `runs`, `run_batches`, `corrections`. A column added after release is
-applied by `ADDED_COLUMNS` in `store.py` — never by dropping the table.
-
-## The judgement cache
-
-The cache key *is* the request: the model, the questions as written, and the state the model
-was shown. Reword a question, change the model, or add a label yourself — invalidated.
-Nothing else. That is why a settled mailbox costs nothing to re-check, and why editing the
-buckets in `decide.py` is the one change that re-buys every answer.
-
-## Review groups (the digest)
-
-Senders do not collapse an inbox: 200 messages came from 140 senders, 102 with a single
-message. Similarity does. Local embeddings (`fastembed`, no torch), greedy
-nearest-centroid, and a threshold chosen from the data — 0.65 on this mailbox, where 0.70
-left 75 groups and 0.60 dissolved the useful "4 finance offers" group into the marketing
-blob. Result: 200 messages → 36 review groups.
-
-## What this deliberately does not do
-
-- **No bodies unless you ask.** Judgement uses headers and a snippet. With
-  `DAMIEN_READ_BODIES=on_escalation` it also reads the *newest text* of the messages the
-  snippet could not settle — quoted replies stripped, capped, attachments never opened — and
-  keeps what it read on your machine so a re-plan costs nothing. Off by default.
-- **No scheduler.** Have the host's own scheduler run `damien pass weekly` every Monday and
-  `damien pass monthly` on the 1st (see the RUNBOOK); the tool exits either way.
-- **No permanent delete.** `trash` is recoverable for 30 days, and the code cannot do more.
-- **No sending.** No send path: nothing sends, drafts-and-sends or forwards (the scope
-  technically permits sending; Damien never calls it).
-- **No telemetry.** Nothing is reported anywhere.
-- **No MCP door.** A small tool wrapper over these functions is the obvious next step for a
-  host that cannot shell out; the CLI costs zero tool schemas in a context.
-
-## Model facts this is built on (all from the vendor docs)
-
-- One request per message with *every* question about it: questions in a call are
-  independent and parallel ("adding questions barely changes the response time"), while
-  many emails in one `state` costs accuracy ("Jev suffers from context rot").
-- `confidence` (0–1) describes how peaked the answer is, **not** whether it is right —
-  hence conservative bands and a person as the last resort.
-- $0.042/Mtok input, output free; the vendor's published measurement is ≈$0.0256 per 1,000
-  items, and this tool measured ≈$0.000046 per message on a real mailbox.
-- A Choice always picks an option even when none fit, so a companion Noul and an `unclear`
-  bucket guard it.
-- Never ask it to count, order or compute — that is code's job.
+Confidence means different things on different models, so thresholds are **per model and
+host**: `damien judge eval` re-judges the mail you've already settled and picks the lowest bar
+that keeps mistakes under 2%, with at least 30 messages behind it. Until a model is
+calibrated, `damien pass` applies only rules and your corrections. (`typesafe/jev-1.13` keeps
+the 0.9 bar it was tuned at.)
 
 ### How the model actually behaved, measured
 
@@ -277,29 +242,68 @@ Across **44,985 judgements** on one real mailbox:
 | | | |
 |---|---|---|
 | **10,735** | 24% | cleared the 0.8 bar and were **acted on unattended** |
-| **11,611** | 26% | between the bars — reported, not acted on |
+| **11,611** | 26% | between the bars: reported, not acted on |
 | **22,639** | 50% | **kept**, because it was not sure enough to touch anything |
 | **36,775** (82%) | | of what it chose was `keep`; `trash` was only 5.5% of its answers |
 
-Two things follow, and they are the reason this design is safe to leave running:
+Half the model's answers never moved a message, and its instinct is `keep`. The archive-and-
+trash volume lives in the **rules**, which are mined from your own corrections and evaluated
+by Gmail. You decide the classes; the model handles what's left, and only when it's sure.
 
-- **Half the model's answers never moved a message.** The confidence gate is not decoration:
-  a judgement below `DAMIEN_CONFIDENCE_ASK` is recorded and the message stays where it is.
-- **The model is conservative, and the rules do the deleting.** Its instinct is `keep`
-  (82%); the 27,072 decisions made by rules — mined from your own corrections, and evaluated
-  by Gmail — are where the archive-and-trash volume actually lives. You decide the classes;
-  the model only handles what is left, and only when it is sure.
+### Cleaning a mailbox of a hundred thousand messages
 
-**200 corrections** were enough to produce **68 rules**, which is **0.44% of judgements**
-touched by hand. That is the whole loop: correct a class once, and it never costs a model
-call again.
+Brute force doesn't work: a Gmail header costs quota, and a first attempt to fetch a whole
+inbox throttled after 64 seconds. So the order is **rule passes first, judgement second,
+and never both over the same messages.**
 
-## Status
+| step | how | messages | cost |
+|---|---|---|---|
+| archive what a rule can describe | `rules plan --scope …` (Gmail evaluates it) | tens of thousands | ~1 min, $0, no headers |
+| judge what is left and recent | `plan build -q '<a date range>'` | a few thousand | ~$0.000046 each |
+| keep it clean | `rules from-senders` on the recurring senders | — | free |
 
-Beta, and in daily use on a 100,000-message mailbox. The test suite runs on Linux and macOS;
-Postgres is exercised on the Linux runners. Interfaces may still move; the safety properties above will
-not.
+A rule query is always wrapped in `in:inbox` unless `--scope` says otherwise: a bare
+`older_than:365d` once matched 152,881 messages here, because it had escaped the inbox and
+was reaching Sent and archived mail too.
 
-MIT licensed. The predecessor project — a four-service platform that this replaced — was
-torn down in October 2026; its repositories remain on GitHub for history and nothing of it
-runs.
+### Where state lives
+
+Everything is in `~/.damien`: one SQLite file by default, or your own Postgres via
+`DAMIEN_DB_URL` (CI runs the suite against both). The tables are `messages`, `decisions`,
+`verdicts` (the judgement cache, keyed on the exact request), `message_embeddings`, `plans`,
+`plan_items`, `runs`, `run_batches` and `corrections`. New columns arrive through
+`ADDED_COLUMNS` in `store.py`, never by dropping a table.
+
+**Review groups:** senders don't collapse an inbox (200 messages came from 140 senders), but
+similarity does. Local embeddings (`fastembed`, no torch) turned 200 messages into 36 review
+groups.
+
+### Documentation
+
+| document | read it for |
+|---|---|
+| [`docs/SETUP.md`](docs/SETUP.md) | your own Gmail credential and judge key, step by step |
+| [`docs/FIRST-RUN.md`](docs/FIRST-RUN.md) | the first hour: look, apply, learn rules, schedule |
+| [`docs/COMMANDS.md`](docs/COMMANDS.md) | every command: when to use it, what it writes, what it costs |
+| [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md) | the pipeline, the store, and what it refuses to do |
+| [`docs/POLICY.md`](docs/POLICY.md) | the layers of authority, the seven buckets, the rule vocabulary |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | the weekly and monthly passes, failure modes, how to undo |
+| [`docs/PRIVACY.md`](docs/PRIVACY.md) | exactly what leaves your machine, and when |
+| [`docs/SKILL-PROMPT.md`](docs/SKILL-PROMPT.md) | installing the agent skill for OpenClaw or Hermes |
+| [`docs/AUDIT-BRIEF.md`](docs/AUDIT-BRIEF.md) | for reviewers: every promise, where it's enforced, where a bug would hide |
+
+### Status
+
+Beta, and in daily use on a 100,000-message mailbox. Interfaces may still move; the safety
+properties above will not. MIT licensed.
+
+---
+
+<div align="center">
+
+**📺 DAMIEN 📺**
+*Your inbox called. It wants its life back.*
+
+**⭐ STAR THE REPO! TELL A FRIEND! DO IT NOW! ⭐**
+
+</div>
