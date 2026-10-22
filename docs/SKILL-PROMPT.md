@@ -80,14 +80,34 @@ If that fails, stop and tell me — do not invent commands.
    applied, a `GmailError`, a pass that stopped part-way, cost far above expectation) into
    the skill, since these are what you will hit.
 
+## Before you schedule anything, prove the pass works
+
+```bash
+cd /Users/riveraix/Downloads/AWS/damien
+./scripts/damien-pass.sh weekly --dry-run
+```
+
+It must print a window, a plan id, counts by action and a cost line, and write nothing to
+Gmail. Report that output to me **before** creating either schedule. If it fails, stop and
+show me the error — do not work around it.
+
+## Do not modify the tool
+
+The repo at `/Users/riveraix/Downloads/AWS/damien` is a git checkout on `main`. Its rules
+(68 of them) and its policy are the product of many deliberate decisions, recorded in
+`docs/POLICY.md`. **Read them; never edit the rules, the buckets or the code unless I ask
+in that session.** If you think a rule is wrong, tell me and give me the command —
+`damien correct`, `damien restore`, `damien rules from-senders` — rather than applying it.
+
 ## Then schedule it
 
-Once the skill exists and you have confirmed the commands run, set up the two schedules:
+Once the dry run has passed and you have reported it, set up the two schedules:
 
 - **every Monday**, `./scripts/damien-pass.sh weekly`;
 - **on the 1st of each month**, `./scripts/damien-pass.sh monthly`.
 
 Run it from `/Users/riveraix/Downloads/AWS/damien` (the script resolves the CLI and the
-store itself). Use your own scheduler. Report the result to me in the format above — and
-when something needs a decision, give me the plan id and the command rather than deciding
-it yourself. If a run fails, tell me the exit reason and do not retry it more than once.
+store itself). Use your own scheduler. Then report the result to me in the format above —
+and when something needs a decision, give me the plan id and the command rather than
+deciding it yourself. If a scheduled run fails, tell me the exit reason and do not retry it
+more than once.
