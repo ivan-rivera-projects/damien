@@ -24,6 +24,7 @@ import typer
 from . import __version__
 from .config import Settings, load_settings
 from .decide import DEFAULT_SPEC
+from .profile import load_profile, write_profile
 from .embed import DEFAULT_SIMILARITY
 from .gmail import Gmail, GmailError
 from .jev import FakeJudge, make_judge
@@ -126,6 +127,44 @@ def status(json_out: bool = typer.Option(False, "--json", help="Machine-readable
 
 
 @app.command()
+def init(force: bool = typer.Option(False, "--force", help="Overwrite what is already there.")) -> None:
+    """Set up this install: profile, rules and a config file. Safe to re-run.
+
+    Nothing here is required to run Damien on the defaults — but `profile.json` is where
+    you tell it whose inbox this is, which is the difference between a tool that files your
+    mail and one that files mail.
+    """
+    settings = _load()
+    root = settings.root
+    root.mkdir(parents=True, exist_ok=True)
+
+    path, written = write_profile(root, force=force)
+    typer.secho(f"{'wrote' if written else 'kept '} {path}", fg="green" if written else "yellow")
+
+    rules_path = root / "rules.json"
+    if not rules_path.exists() or force:
+        save_rules(rules_path, default_rules())
+        typer.secho(f"wrote {rules_path}", fg="green")
+    else:
+        typer.secho(f"kept  {rules_path}", fg="yellow")
+
+    env_path = root / ".env"
+    if not env_path.exists() or force:
+        example = Path(__file__).resolve().parents[2] / ".env.example"
+        if example.exists():
+            env_path.write_text(example.read_text())
+            typer.secho(f"wrote {env_path}", fg="green")
+
+    typer.echo()
+    typer.secho("next:", bold=True)
+    typer.echo(f"  1. edit {path} — describe whose inbox this is and what belongs in it")
+    typer.echo(f"  2. edit {env_path} — your account, and the judge you want (rules | openrouter | fake)")
+    typer.echo("  3. damien login                      # Gmail, read/write in one browser tab")
+    typer.echo("  4. damien plan build -q 'in:inbox' --limit 200 --show 20")
+    typer.echo("  5. read it, then: damien plan approve <plan_id> && damien plan apply <plan_id> --token <t> --yes")
+
+
+@app.command()
 def scan(
     query: str = typer.Option("in:inbox", "--query", "-q", help="Gmail search query."),
     limit: int | None = typer.Option(None, "--limit", "-n", help="Stop after this many messages."),
@@ -168,6 +207,7 @@ def plan_build(
         judge = _judge(settings, judge_mode, cache=VerdictCache(store))
         try:
             plan = build_plan(store=store, gmail=gmail, rules=rules, judge=judge, query=query, limit=limit,
+                              spec=load_profile(settings.root).spec(),
                               ttl_hours=settings.header_ttl_hours, stats=stats,
                               judge_batch=settings.judge_batch, ask_below=settings.confidence_ask,
                               protected_labels=settings.protect_labels, model=settings.model)

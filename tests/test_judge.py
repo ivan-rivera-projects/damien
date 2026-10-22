@@ -245,18 +245,21 @@ def test_a_changed_message_is_judged_again(settings, tmp_path):
         store.close()
 
 
-def test_the_spec_names_the_persons_world_and_policy():
+def test_the_default_spec_names_nobody_in_particular():
+    """The built-in spec ships to strangers, so it may not name a person, a trade or a
+    taste — that is what ~/.damien/profile.json is for. What must survive is the policy
+    that is about *intent*, not identity."""
     spec = DEFAULT_SPEC
-    text = spec.context.lower()
-    for word in ("streetwear", "fashion", "music", "artificial intelligence", "aws"):
-        assert word in text, word
-    keep = next(b for b in spec.buckets if b.key == "keep")
-    assert "fashion" in keep.description.lower()
-    assert "ai" in keep.description.lower()                       # AI and technology stay in the inbox
+    text = (spec.context + " " + " ".join(b.description for b in spec.buckets)).lower()
+    for leaked in ("streetwear", "fashion", "music-industry", "little giants", "he follows",
+                   "she follows", "he keeps", "his inbox", "1shotmanagement"):
+        assert leaked not in text, f"the default spec names {leaked!r} — that belongs in a profile"
+
     promo = next(b for b in spec.buckets if b.key == "promotion")
-    assert "brand he follows" in promo.description.lower()       # a brand he follows is never a promo
+    assert "still marketing" in promo.description.lower()          # a company you use: marketing is marketing
     newsletter = next(b for b in spec.buckets if b.key == "newsletter")
     assert "those belong in the inbox" in newsletter.description.lower()
+    assert len(spec.buckets) == 7
 
 
 def test_two_messages_with_identical_state_are_both_judged(settings, tmp_path):

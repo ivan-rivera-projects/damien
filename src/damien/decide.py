@@ -74,39 +74,35 @@ class JudgementSpec:
         return None
 
 
-DEFAULT_SPEC = JudgementSpec(
-    context=(
-        "A music producer and manager's personal Gmail inbox. He runs a streetwear label "
-        "(Little Giants). Mail that belongs in the inbox: clients, collaborators, money, "
-        "contracts, bookings, and anything written by a person. He keeps — and reads — "
-        "fashion and streetwear: drops, lookbooks and announcements from brands he follows, "
-        "and fashion production (materials, manufacturers, samples, suppliers, wholesale). "
-        "He keeps music-industry mail: artists, labels, publishers, studios, engineers, "
-        "splits, masters, releases, invoices for work, and music-business news. "
-        "He follows artificial intelligence and technology closely and wants it in the inbox: "
-        "AI newsletters and research, model and tool releases, developer and engineering "
-        "digests, cloud and AWS updates, infrastructure and platform news. "
-        "A promotional email from a clothing or music brand is still mail he wants; a discount "
-        "blast from a retailer he does not deal with is not."
-    ),
-    buckets=(
-        Bucket("keep", "Belongs in the inbox: written by a person, needs attention, or is fashion, "
-                       "streetwear, music-industry, AI or technology mail he follows", Action.keep),
-        Bucket("receipt", "An automated receipt, order or confirmation for something already done",
-               Action.label, "Receipts"),
-        Bucket("newsletter", "A newsletter or digest he subscribed to that is not about fashion, "
-                             "music, AI or technology — those belong in the inbox", Action.label,
-               "Newsletters"),
-        Bucket("promotion", "A discount, sale, pitch or upsell — including marketing from a company he "
-                            "already uses, which is still marketing, and never news about that company's "
-                            "field. Never a clothing or music brand he follows", Action.trash),
-        Bucket("notification", "Automated notification (social, app, security, shipping) with nothing to do",
-               Action.archive),
-        Bucket("archive", "Once-useful, now done: keep the message, get it out of the way",
-               Action.archive),
-        Bucket("unclear", "Cannot tell from the headers and snippet whether this matters", Action.keep),
-    ),
+# The tool's vocabulary: seven buckets, one action each. These descriptions are the
+# *default*, neutral ones. Nothing here may name a person, a trade or a taste — a person's
+# own framing lives in ~/.damien/profile.json, which `profile.py` overlays on these.
+BUCKETS = (
+    Bucket("keep", "Belongs in the inbox: written by a person, needs attention, or is one of "
+                   "the subjects they follow", Action.keep),
+    Bucket("receipt", "An automated receipt, order or confirmation for something already done",
+           Action.label, "Receipts"),
+    Bucket("newsletter", "A newsletter or digest they subscribed to that is not one of the "
+                         "subjects they follow — those belong in the inbox", Action.label,
+           "Newsletters"),
+    Bucket("promotion", "A discount, sale, pitch or upsell — including marketing from a company "
+                        "they already use, which is still marketing, and never news about that "
+                        "company's field", Action.trash),
+    Bucket("notification", "Automated notification (social, app, security, shipping) with nothing to do",
+           Action.archive),
+    Bucket("archive", "Once-useful, now done: keep the message, get it out of the way",
+           Action.archive),
+    Bucket("unclear", "Cannot tell from the headers and snippet whether this matters", Action.keep),
 )
+
+DEFAULT_CONTEXT = (
+    "The owner's personal Gmail inbox. Mail that belongs in the inbox: anything written by a "
+    "person, anything that needs a decision or a payment, and the subjects they follow. "
+    "A discount blast from a retailer they do not deal with does not belong in the inbox; "
+    "mail from a company they do deal with does, even when it is marketing."
+)
+
+DEFAULT_SPEC = JudgementSpec(context=DEFAULT_CONTEXT, buckets=BUCKETS)
 
 
 class PersonJudge:
