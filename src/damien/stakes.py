@@ -36,6 +36,14 @@ CONSEQUENTIAL_TERMS: tuple[str, ...] = (
     "verify", "verification", "suspend", "suspended", "locked", "unauthorized", "unauthorised", "breach",
     "security", "sign-in", "signin", "password", "one-time", "2fa", "mfa",
     "legal", "contract", "agreement", "lawsuit", "cease and desist", "tax", "irs", "wire", "transfer",
+    # Business registration and admin: never something a model may file away or trash.
+    "llc", "inc", "corp", "corporation", "annual report", "registration", "registered agent", "filing",
+    "secretary of state", "sunbiz", "franchise tax", "business license", "license", "ein", "compliance",
+    "certificate of good standing", "good standing", "articles of organization", "1099", "w-9", "w9",
+    "payroll", "sales tax", "bookkeeping",
+    # Money: statements, bills and balances.
+    "statement", "bill", "balance", "receipt", "deposit", "payout", "bank", "credit card", "loan",
+    "subscription", "order", "purchase", "owed", "due",
 )
 
 

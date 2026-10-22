@@ -280,8 +280,8 @@ def test_two_messages_with_identical_state_are_both_judged(settings, tmp_path):
     try:
         from damien.decide import decide_all
         cache = VerdictCache(store)
-        twin_a = a_message("twin", id="id-a", label_ids=["INBOX", "UNREAD"])
-        twin_b = a_message("twin", id="id-b", label_ids=["INBOX", "UNREAD"])   # identical state, different id
+        twin_a = a_message("twin", id="id-a", subject="New arrivals this week", label_ids=["INBOX", "UNREAD"])
+        twin_b = a_message("twin", id="id-b", subject="New arrivals this week", label_ids=["INBOX", "UNREAD"])
         assert twin_a.model_dump(exclude={"id"}) == twin_b.model_dump(exclude={"id"})
 
         judge = JevJudge(live, DEFAULT_SPEC, transport=httpx.MockTransport(handler), cache=cache)

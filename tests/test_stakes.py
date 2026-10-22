@@ -100,7 +100,7 @@ def test_the_real_pinterest_reply_is_now_held():
 
 
 def test_a_reply_from_a_bulk_sender_is_not_treated_as_a_person():
-    m = a_message("Re: your order", from_addr="news@list.example", list_id="List <x.example>")
+    m = a_message("Re: this week's picks", from_addr="news@list.example", list_id="List <x.example>")
     assert stake_floor(m, machine_sent=0.05, importance=0.4) is None
 
 
@@ -232,3 +232,12 @@ def test_an_alarm_is_held_under_every_action_but_money_only_when_it_leaves():
     assert stake_floor(receipt, action=Action.label) is None       # filing it is the point
     assert stake_floor(receipt, action=Action.trash) is not None   # but it does not get thrown out
     assert stake_floor(receipt, action=Action.archive) is not None
+
+
+def test_business_admin_and_money_mail_is_never_filed_away_by_a_model():
+    """A real trash at 0.70 on a company's state filing, and an archive of a card statement."""
+    for subject in ("MOMDEM, LLC - 2026 Florida Annual Report | File with GovFile",
+                    "Your credit card statement is available"):
+        decision = decide_message(a_message(subject, from_addr="no-reply@vendor.example"), rules=(),
+                                  verdict=verdict("promotion", machine_sent=0.95), spec=DEFAULT_SPEC)
+        assert decision.action is Action.keep, subject
