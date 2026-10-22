@@ -1,0 +1,42 @@
+name: release
+
+# A tag `vX.Y.Z` publishes that version to PyPI. Publishing uses PyPI trusted publishing
+# (OIDC): no token is stored in this repository.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: the tag names the version pyproject declares
+        run: |
+          declared="$(python3 -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          test "v$declared" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME but pyproject says $declared"; exit 1; }
+      - run: uv build
+      - name: the wheel carries the agent skill
+        run: python3 -m zipfile -l dist/*.whl | grep -q 'damien/skill/SKILL.md'
+      - name: the wheel installs and runs
+        run: |
+          uv venv /tmp/smoke && VIRTUAL_ENV=/tmp/smoke uv pip install dist/*.whl
+          test "$(/tmp/smoke/bin/damien version | head -1)" = "damien ${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
