@@ -239,7 +239,8 @@ def plan_build(
                               spec=load_profile(settings.root).spec(),
                               ttl_hours=settings.header_ttl_hours, stats=stats,
                               judge_batch=settings.judge_batch, ask_below=settings.confidence_ask,
-                              protected_labels=settings.protect_labels, model=settings.model)
+                              protected_labels=settings.protect_labels, model=settings.model,
+                              read_bodies=settings.read_bodies)
         except GmailError as exc:
             typer.secho(str(exc), fg="red")
             raise typer.Exit(1) from exc
@@ -259,6 +260,8 @@ def plan_build(
     typer.secho(f"plan {plan.id}  ({len(plan.items)} item(s))", bold=True)
     if stats:
         typer.echo(f"  headers: {stats['cached']} from cache · {stats['fetched']} fetched from Gmail")
+        if stats.get("escalated"):
+            typer.echo(f"  bodies:  {stats['escalated']} read, for the messages the snippet could not settle")
     for action, n in sorted(counts.items()):
         typer.echo(f"  {action:<10} {n}")
     if calls or cached_calls:

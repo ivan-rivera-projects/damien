@@ -38,6 +38,11 @@ OPENROUTER_API_KEY=
 # Unset = one SQLite file at ~/.damien/damien.db. Set = Postgres.
 # DAMIEN_DB_URL=postgres://user:password@127.0.0.1:5432/damien
 
+# off | on_escalation. on_escalation reads the newest text of the messages the headers and
+# snippet could not settle, and asks again - the only mode where message text reaches the
+# judge (see docs/PRIVACY.md). What it reads is kept locally; attachments are never opened.
+DAMIEN_READ_BODIES=off
+
 # Labels the model may never act against: anything carrying one is kept.
 DAMIEN_PROTECT_LABELS=ACTION REQUIRED,WAITING FOR,Bills
 
@@ -105,6 +110,7 @@ class Settings:
     fetch_concurrency: int        # parallel Gmail metadata calls
     max_rps: float                # ceiling on Gmail requests/second (quota is per minute)
     mark_read_when_filed: bool = False  # filing also drops UNREAD, so unread means "not looked at"
+    read_bodies: str = "off"            # off | on_escalation — read the text only where the snippet failed
 
     def redacted(self) -> dict[str, object]:
         d = dict(self.__dict__)
@@ -160,4 +166,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
             p.strip() for p in (env("DAMIEN_PROTECT_LABELS") or ",".join(DEFAULT_PROTECTED)).split(",") if p.strip()
         ),
         mark_read_when_filed=env("DAMIEN_MARK_READ_WHEN_FILED").lower() in ("1", "true", "yes", "on"),
+        read_bodies=("on_escalation"
+                     if env("DAMIEN_READ_BODIES").strip().lower() in ("on_escalation", "1", "true", "yes", "on")
+                     else "off"),
     )

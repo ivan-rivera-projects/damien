@@ -65,6 +65,11 @@ def message_state(message: Message, context: str = "", label_names: dict[str, st
         "has_attachment": message.has_attachment,
         "is_mailing_list": bool(message.list_id or message.list_unsubscribe),
     }
+    if message.body:
+        # The newest text only, and only for messages the snippet could not settle. It is
+        # part of the state, so it is part of the cache key: an escalated judgement and a
+        # snippet-only judgement of the same message are different answers, cached apart.
+        block["body"] = message.body
     if message.category:
         block["gmail_category"] = message.category
     own = [names.get(lid, lid) for lid in message.own_label_ids]

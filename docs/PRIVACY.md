@@ -1,7 +1,9 @@
 # Privacy — what stays here, and what does not
 
 The short version: **nothing leaves your machine unless you switch a judge on**, and even
-then it is headers and a snippet — never the body of a message, never an attachment.
+then it is headers and a snippet by default. With `DAMIEN_READ_BODIES=on_escalation` it also
+sends the **newest text** of the messages the snippet could not settle — quoted replies
+stripped, HTML flattened, capped at 4,000 characters — and still never an attachment.
 
 There is no server, no account with this project, no telemetry, and no analytics. This
 document describes a program you run yourself.
@@ -33,8 +35,20 @@ whether it is a mailing list, Gmail's own category, labels you applied,
 plus your profile's `context` (the description of you that you wrote)
 ```
 
-What is **never** sent: the message body (the tool does not fetch it), attachments, your
-account address, message ids, or anything about your other messages. The judge answers one
+What is **never** sent: attachments, your account address, message ids, or anything about
+your other messages.
+
+Whether the body is sent depends on one setting, because that is the whole difference:
+
+| `DAMIEN_READ_BODIES` | what the judge sees | 
+|---|---|
+| `off` (default) | from, subject, a 600-character snippet, Gmail's category, your labels |
+| `on_escalation` | the above, plus the newest text of messages the snippet could not settle |
+
+Escalation is *narrow on purpose*: it fires only where the first answer was `unclear` or below
+the confidence bar, it strips quoted replies and signatures first (the newest words only), it
+caps the text at 4,000 characters, and it never opens an attachment. What it read is then kept
+in your local store (`body_excerpt`) so the same message is not fetched — or sent — twice. The judge answers one
 question per message — which bucket — and nothing else.
 
 **3. Nothing else.** No usage statistics, no crash reports, no version check, no banner.

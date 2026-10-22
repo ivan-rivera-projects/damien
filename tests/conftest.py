@@ -59,12 +59,16 @@ class FakeGmailState:
 
     def add(self, mid: str, *, subject: str = "Hello", sender: str = "Alex <alex@example.com>",
             labels: list[str] | None = None, date_ms: int = 1_700_000_000_000, snippet: str = "hi",
-            list_unsub: bool = False, attachment: bool = False) -> None:
+            list_unsub: bool = False, attachment: bool = False, body: str | None = None) -> None:
         headers = [{"name": "From", "value": sender}, {"name": "Subject", "value": subject},
                    {"name": "To", "value": "me@example.com"}, {"name": "Date", "value": "Mon, 1 Jan 2024 00:00:00 +0000"}]
         if list_unsub:
             headers.append({"name": "List-Unsubscribe", "value": "<mailto:u@example.com>"})
-        parts = [{"filename": "invoice.pdf"}] if attachment else []
+        parts: list[dict] = [{"filename": "invoice.pdf"}] if attachment else []
+        if body is not None:
+            import base64
+            parts.append({"mimeType": "text/plain", "filename": "",
+                          "body": {"data": base64.urlsafe_b64encode(body.encode()).decode()}})
         self.messages[mid] = {
             "id": mid, "threadId": f"t-{mid}", "internalDate": str(date_ms), "snippet": snippet,
             "labelIds": labels or ["INBOX", "UNREAD"], "sizeEstimate": 1234,

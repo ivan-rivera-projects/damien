@@ -74,6 +74,14 @@ judges what is left, and costs money in proportion to how much is left.
 `--judge auto|fake|none` on `plan build`: `none` decides by rules only (free), `fake` is
 a deterministic stand-in for a dry run with no API key.
 
+`DAMIEN_READ_BODIES=on_escalation` makes the judge read the *newest text* of the messages it
+could not settle from the headers and snippet, and ask again. It is the only mode where message
+text reaches the judge — see `PRIVACY.md` — and the plan reports how many it read:
+
+```
+  bodies:  12 read, for the messages the snippet could not settle
+```
+
 ## Reading a plan before it acts
 
 ```bash

@@ -75,6 +75,7 @@ def build_plan(
     stats: dict[str, int] | None = None,
     limit: int | None = None,
     model: str | None = None,
+    read_bodies: str = "off",
 ) -> Plan:
     """List, fetch, decide, store. No writes to Gmail.
 
@@ -98,6 +99,34 @@ def build_plan(
     decisions = decide_all(messages, rules=rules, judge=judge, spec=spec, batch_size=judge_batch,
                            ask_below=ask_below, label_names=label_names, model=model,
                            protected_labels=protected_labels or DEFAULT_PROTECTED)
+
+    # Escalation: for the messages the snippet could not settle, read the newest words and
+    # ask again. Off unless `DAMIEN_READ_BODIES=on_escalation`, because it is the one mode
+    # where message text reaches the judge — see docs/PRIVACY.md.
+    if read_bodies == "on_escalation" and judge is not None and gmail is not None:
+        unsure = [d.message_id for d in decisions
+                  if d.source is Source.jev and (d.confidence or 0.0) < ask_below]
+        by_id = {m.id: m for m in messages}
+        # `None` means we have not looked; `""` means we looked and the new words were all
+        # quoted. Both are remembered, so a body is read once and never re-read for nothing.
+        unknown = [mid for mid in unsure if by_id.get(mid) is not None and by_id[mid].body is None]
+        if unknown:
+            for mid, text in gmail.fetch_bodies(unknown).items():
+                by_id[mid].body = text
+            for mid in unknown:
+                if by_id[mid].body is None:
+                    by_id[mid].body = ""
+            store.upsert_messages([by_id[mid] for mid in unknown])
+        escalating = [by_id[mid] for mid in unsure if by_id.get(mid) and by_id[mid].body]
+        if escalating:
+            again = decide_all(escalating, rules=(), judge=judge, spec=spec, batch_size=judge_batch,
+                               ask_below=ask_below, label_names=label_names, model=model,
+                               protected_labels=protected_labels or DEFAULT_PROTECTED)
+            replaced = {d.message_id: d for d in again}
+            decisions = [replaced.get(d.message_id, d) for d in decisions]
+            if stats is not None:
+                stats["escalated"] = len(escalating)
+
     decisions = apply_corrections(decisions, {r["message_id"]: dict(r) for r in store.corrections(limit=10_000)})
     store.add_decisions(decisions, account=(gmail.settings.account if gmail is not None else ""))
 

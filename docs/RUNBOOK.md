@@ -20,6 +20,11 @@ action, the cost, what it applied, what is waiting, and the command that applies
 `--limit N` caps how much one pass looks at. Exit 0 means a pass ran (or there was nothing
 to do); exit 1 means it failed, with the reason.
 
+With `DAMIEN_READ_BODIES=on_escalation`, a pass also reads the newest text of the messages it
+could not settle, and reports `bodies: N read`. That is the one mode where message text reaches
+the judge, it reads only the undecided mail, and what it read is kept locally so a re-plan costs
+no Gmail call. See `PRIVACY.md` before turning it on.
+
 With `DAMIEN_MARK_READ_WHEN_FILED=1`, everything a pass files away is also marked read, so the
 unread count becomes a real list of what you have not dealt with yet. Kept mail is never
 marked read — it is never written to at all — and `damien run undo <run_id>` puts the unread

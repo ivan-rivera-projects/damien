@@ -116,6 +116,7 @@ DAMIEN_JUDGE=rules
 DAMIEN_MODEL=typesafe/jev-1.13
 OPENROUTER_API_KEY=
 DAMIEN_MARK_READ_WHEN_FILED=0     # 1 = filing also marks read, so unread means "not looked at"
+DAMIEN_READ_BODIES=off            # on_escalation = read the text where the snippet failed
 ```
 
 ## 4. Set up your own policy

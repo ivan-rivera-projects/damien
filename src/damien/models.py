@@ -46,6 +46,7 @@ class Message(BaseModel):
     to: str | None = None
     subject: str | None = None
     snippet: str | None = None
+    body: str | None = None          # the newest text, only when a body was read for it
     label_ids: list[str] = Field(default_factory=list)
     has_attachment: bool = False
     list_unsubscribe: bool = False

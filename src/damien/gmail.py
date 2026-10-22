@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from .config import Settings
+from .mime import DEFAULT_LIMIT, payload_text
 from .models import Message
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
@@ -105,6 +106,7 @@ class Gmail:
         self._creds: Any = None
         self._label_names: dict[str, str] | None = None
         self.fetched = 0                                  # messages actually downloaded this run
+        self.bodies = 0                                   # bodies read (the escalation set only)
         self.throttled = 0                                # times Gmail said "too fast"
         self.limiter = RateLimiter(getattr(settings, "max_rps", 20.0))
 
@@ -350,6 +352,30 @@ class Gmail:
         if mark_read and not keep_in_inbox:
             remove.append("UNREAD")
         return self.modify(ids, add=[label_id], remove=remove)
+
+    def fetch_bodies(self, ids: Sequence[str], *, concurrency: int | None = None,
+                     limit: int = DEFAULT_LIMIT) -> dict[str, str]:
+        """The newest words of each message — only ever called for the escalation set.
+
+        `format=full` is a far bigger response than the metadata call the rest of the tool
+        makes, so this is for the messages the snippet could not settle and no others. Only
+        ids with readable text come back: a message whose new words are all quoted has none,
+        and is left to be decided on its headers.
+        """
+        if not ids:
+            return {}
+        workers = max(1, concurrency or self.settings.fetch_concurrency)
+        if len(ids) > 1 and workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                pairs = list(pool.map(lambda mid: (mid, self._fetch_body(mid, limit)), ids))
+        else:
+            pairs = [(mid, self._fetch_body(mid, limit)) for mid in ids]
+        return {mid: text for mid, text in pairs if text}
+
+    def _fetch_body(self, mid: str, limit: int) -> str:
+        self.bodies += 1
+        data = self._request("GET", f"{API}/messages/{mid}", params={"format": "full"})
+        return payload_text(data.get("payload") or {}, limit=limit)
 
 
 THROTTLE_MARKS = ("Quota exceeded", "rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED",

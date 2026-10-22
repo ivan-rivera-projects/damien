@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS messages (
   list_unsubscribe INTEGER NOT NULL DEFAULT 0,
   list_id TEXT,
   size_estimate INTEGER,
+  body_excerpt TEXT,
   seen_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_account_date ON messages(account, internal_date);
@@ -163,6 +164,7 @@ CREATE TABLE IF NOT EXISTS messages (
   list_unsubscribe INTEGER NOT NULL DEFAULT 0,
   list_id TEXT,
   size_estimate INTEGER,
+  body_excerpt TEXT,
   seen_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS messages_account_date ON messages(account, internal_date);
@@ -348,7 +350,7 @@ class Store:
     # Columns added after the first release. CREATE TABLE IF NOT EXISTS cannot add a
     # column to an existing table, and this tool must survive its own schema changes.
     ADDED_COLUMNS: ClassVar[dict[str, dict[str, str]]] = {
-        "messages": {"list_id": "TEXT"},
+        "messages": {"list_id": "TEXT", "body_excerpt": "TEXT"},
         "plan_items": {"keep_in_inbox": "INTEGER NOT NULL DEFAULT 0"},
         "plans": {
             "judge_usd": "DOUBLE PRECISION NOT NULL DEFAULT 0",
@@ -406,20 +408,22 @@ class Store:
             (
                 m.id, m.account, m.thread_id, m.internal_date, m.from_addr, m.from_name, m.to,
                 m.subject, m.snippet, json.dumps(m.label_ids), int(m.has_attachment),
-                int(m.list_unsubscribe), m.list_id, m.size_estimate, stamp,
+                int(m.list_unsubscribe), m.list_id, m.size_estimate, m.body, stamp,
             )
             for m in messages
         ]
         self.conn.executemany(
             """INSERT INTO messages (id, account, thread_id, internal_date, from_addr, from_name, to_addr,
-                                     subject, snippet, label_ids, has_attachment, list_unsubscribe, list_id, size_estimate, seen_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                     subject, snippet, label_ids, has_attachment, list_unsubscribe, list_id,
+                                     size_estimate, body_excerpt, seen_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO UPDATE SET
                  thread_id=EXCLUDED.thread_id, internal_date=EXCLUDED.internal_date, from_addr=EXCLUDED.from_addr,
                  from_name=EXCLUDED.from_name, to_addr=EXCLUDED.to_addr, subject=EXCLUDED.subject,
                  snippet=EXCLUDED.snippet, label_ids=EXCLUDED.label_ids, has_attachment=EXCLUDED.has_attachment,
                  list_unsubscribe=EXCLUDED.list_unsubscribe, list_id=EXCLUDED.list_id,
                  size_estimate=EXCLUDED.size_estimate,
+                 body_excerpt=COALESCE(EXCLUDED.body_excerpt, messages.body_excerpt),
                  seen_at=EXCLUDED.seen_at""",
             rows,
         )
@@ -717,5 +721,5 @@ def _message(row: Any) -> Message:
         from_addr=row["from_addr"], from_name=row["from_name"], to=row["to_addr"], subject=row["subject"],
         snippet=row["snippet"], label_ids=json.loads(row["label_ids"]),
         has_attachment=bool(row["has_attachment"]), list_unsubscribe=bool(row["list_unsubscribe"]),
-        list_id=row["list_id"], size_estimate=row["size_estimate"],
+        list_id=row["list_id"], size_estimate=row["size_estimate"], body=row["body_excerpt"],
     )

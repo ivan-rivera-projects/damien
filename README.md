@@ -20,8 +20,10 @@ messages be put in order by software you would actually leave alone with your ma
 - **Rules run first, and they are free.** A rule that maps onto Gmail search syntax is
   executed *by Gmail* — no listings, no headers, no model. On a settled mailbox a pass
   costs **$0**.
-- **The model only ever sees what your rules could not settle** — headers and a snippet,
-  never the body — and every answer is cached, so a message is never paid for twice.
+- **The model only ever sees what your rules could not settle** — headers and a snippet —
+  and every answer is cached, so a message is never paid for twice. It reads the *text* only
+  if you ask it to (`DAMIEN_READ_BODIES=on_escalation`), only for the messages the snippet
+  could not settle, and never an attachment.
 - **Your keys, your credential, nothing in the middle.** No server, no account here, no
   telemetry. Run it with no model at all if you like (`DAMIEN_JUDGE=rules`).
 - **It does not send.** There is no send path and no send scope.
@@ -128,7 +130,7 @@ scan ──► rules ──► (residue) ──► the judge ──► guardrail
    as `your_labels`, and your own corrections outrank a rule and the model on every later
    plan.
 4. **The judge sees only the residue**, as a small state (headers + snippet, never the
-   body) and *atomic* questions: which bucket, was it sent by a machine, does it want a
+   body, unless escalation is on) and *atomic* questions: which bucket, was it sent by a machine, does it want a
    reply, how important. One request per message. The answers are kept as data, so
    thresholds can be re-tuned without paying again.
 5. **A guardrail may only raise an action to `keep`** — never overrule you or a rule. It
@@ -230,8 +232,10 @@ blob. Result: 200 messages → 36 review groups.
 
 ## What this deliberately does not do
 
-- **No bodies, no attachments.** Judgement uses headers and a snippet. Reading bodies is a
-  deliberate later decision.
+- **No bodies unless you ask.** Judgement uses headers and a snippet. With
+  `DAMIEN_READ_BODIES=on_escalation` it also reads the *newest text* of the messages the
+  snippet could not settle — quoted replies stripped, capped, attachments never opened — and
+  keeps what it read on your machine so a re-plan costs nothing. Off by default.
 - **No scheduler.** Run it, or schedule it (see the RUNBOOK); the tool exits either way.
 - **No permanent delete.** `trash` is recoverable for 30 days, and the code cannot do more.
 - **No sending.** No send path, no send scope.
