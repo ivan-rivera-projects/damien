@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" font-family="Impact, 'Arial Black', Helvetica, sans-serif">
+  <g transform="translate(150 150) rotate(-8)">
+    <polygon fill="#ffd000" stroke="#d4143c" stroke-width="6" points="0,-140 28,-86 84,-112 77,-51 138,-43 98,0 138,43 77,51 84,112 28,86 0,140 -28,86 -84,112 -77,51 -138,43 -98,0 -138,-43 -77,-51 -84,-112 -28,-86"/>
+    <text text-anchor="middle" y="-28" font-size="34" fill="#d4143c">BUT WAIT!</text>
+    <text text-anchor="middle" y="14" font-size="30" fill="#7a0010">THERE'S</text>
+    <text text-anchor="middle" y="54" font-size="40" fill="#d4143c">MORE!</text>
+  </g>
+</svg>

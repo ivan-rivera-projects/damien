@@ -1,8 +1,6 @@
 <div align="center">
 
-# 📺 DAMIEN 📺
-
-### ★ THE INBOX CLEANER THAT *ASKS FIRST!* ★
+<img src="docs/assets/hero.svg" alt="DAMIEN — the inbox cleaner that asks first!" width="100%">
 
 *As seen on your terminal!*
 
@@ -19,7 +17,7 @@
 
 ## ARE YOU TIRED OF THIS?
 
-*\[Black-and-white footage. A person stares at a laptop. A number climbs. They sigh at the camera.\]*
+<img src="docs/assets/before-after.svg" alt="Before: an inbox of 107,710. After: 6,825, three minutes, seventeen cents, nothing deleted." width="100%">
 
 **107,710 UNREAD EMAILS.** Receipts from 2019. Newsletters you never asked for. A **"FINAL HOURS"
 SALE** that ended three presidents ago. And somewhere in that mess, buried like treasure:
@@ -40,15 +38,9 @@ You've tried *one of those AI apps* that wanted your password, your data and you
 **Damien is the Gmail triage machine that runs on YOUR computer, with YOUR keys, and
 NEVER touches a single message until YOU say so!**
 
-```
-$ damien plan build -q 'in:inbox'
-plan 8f6ed799980e  (7054 item(s))
-  archive    49
-  keep     6825
-  label      66
-  trash     114
-  judgment: 3709 call(s), 575 from cache, $0.1713
-```
+<img src="docs/assets/demo.gif" alt="damien plan build, plan approve, plan apply --only trash, run undo — recorded against a fake mailbox" width="100%">
+
+<sub>*Recorded live! (Against a fake mailbox, so nobody's real mail is on television.) Re-record it with `vhs docs/assets/demo.tape`.*</sub>
 
 **IT SLICES!** 🔪 Your rules sort mail first, **for free**, inside Gmail itself!
 
@@ -84,6 +76,12 @@ not the engine!
 ---
 
 ## 🚨 BUT WAIT... THERE'S MORE! 🚨
+
+<p align="center">
+  <img src="docs/assets/burst-more.svg" width="180" alt="BUT WAIT! THERE'S MORE!">
+  <img src="docs/assets/burst-price.svg" width="180" alt="ONLY $0.045 PER 1,000 EMAILS! THEN FREE FOREVER">
+  <img src="docs/assets/burst-nosend.svg" width="180" alt="NO SEND PATH! NO DELETE PATH EITHER!">
+</p>
 
 *\[The announcer is now SHOUTING.\]*
 
@@ -122,7 +120,7 @@ Not ever. **WE CHECKED!** 🔍
 
 ## 📞 OPERATORS ARE STANDING BY!
 
-*\[A phone number flashes on screen. It is actually a terminal command.\]*
+<img src="docs/assets/call-now.svg" alt="OPERATORS ARE STANDING BY! $ uvx damien --help" width="100%">
 
 ### CALL NOW! *(Type now.)*
 

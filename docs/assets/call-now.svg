@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 260" font-family="Impact, 'Arial Black', Helvetica, sans-serif">
+  <rect width="1280" height="260" fill="#1b4fd8"/>
+  <rect x="0" y="0" width="1280" height="260" fill="none" stroke="#ffd000" stroke-width="14"/>
+  <rect x="14" y="14" width="1252" height="232" fill="none" stroke="#d4143c" stroke-width="6"/>
+  <!-- blinking-style arrows -->
+  <g fill="#ffd000" font-size="90">
+    <text x="40" y="160">➤</text><text x="1150" y="160">➤</text>
+  </g>
+  <text x="640" y="78" text-anchor="middle" font-size="44" fill="#ffd000" stroke="#7a0010" stroke-width="2">OPERATORS ARE STANDING BY!</text>
+  <text x="640" y="110" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="20" fill="#fff" font-style="italic">(There are no operators. It's a command. Type it.)</text>
+  <rect x="290" y="130" width="700" height="88" rx="12" fill="#0b0b0b" stroke="#ffd000" stroke-width="4"/>
+  <text x="640" y="190" text-anchor="middle" font-family="Menlo, Consolas, monospace" font-size="46" fill="#39ff6a">$ uvx damien --help</text>
+  <text x="640" y="244" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#ffd000">* Not available in stores. Batteries not included. Gmail account required. Your inbox may vary.</text>
+</svg>

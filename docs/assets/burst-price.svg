@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" font-family="Impact, 'Arial Black', Helvetica, sans-serif">
+  <g transform="translate(150 150) rotate(10)">
+    <polygon fill="#d4143c" stroke="#ffd000" stroke-width="6" points="0,-140 28,-86 84,-112 77,-51 138,-43 98,0 138,43 77,51 84,112 28,86 0,140 -28,86 -84,112 -77,51 -138,43 -98,0 -138,-43 -77,-51 -84,-112 -28,-86"/>
+    <text text-anchor="middle" y="-34" font-size="22" fill="#fff">ONLY</text>
+    <text text-anchor="middle" y="14" font-size="46" fill="#ffd000">$0.045</text>
+    <text text-anchor="middle" y="46" font-size="22" fill="#fff">PER 1,000 EMAILS!</text>
+    <text text-anchor="middle" y="74" font-size="16" fill="#ffd000">THEN FREE FOREVER*</text>
+  </g>
+</svg>

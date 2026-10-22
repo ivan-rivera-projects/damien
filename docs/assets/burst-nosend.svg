@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" font-family="Impact, 'Arial Black', Helvetica, sans-serif">
+  <g transform="translate(150 150) rotate(-14)">
+    <polygon fill="#1b4fd8" stroke="#ffd000" stroke-width="6" points="0,-140 28,-86 84,-112 77,-51 138,-43 98,0 138,43 77,51 84,112 28,86 0,140 -28,86 -84,112 -77,51 -138,43 -98,0 -138,-43 -77,-51 -84,-112 -28,-86"/>
+    <text text-anchor="middle" y="-30" font-size="30" fill="#ffd000">NO SEND</text>
+    <text text-anchor="middle" y="10" font-size="30" fill="#ffd000">PATH!</text>
+    <text text-anchor="middle" y="46" font-size="20" fill="#fff">NO DELETE</text>
+    <text text-anchor="middle" y="72" font-size="20" fill="#fff">PATH EITHER!</text>
+  </g>
+</svg>
