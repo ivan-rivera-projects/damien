@@ -26,6 +26,26 @@ messages be put in order by software you would actually leave alone with your ma
   telemetry. Run it with no model at all if you like (`DAMIEN_JUDGE=rules`).
 - **It does not send.** There is no send path and no send scope.
 
+## What it did on a real mailbox
+
+One Gmail account, used daily, 107,710 messages in the inbox when this started. Every figure
+below is measured by the tool itself, not estimated:
+
+| | |
+|---|---|
+| **107,710 → under 7,000** messages in the inbox | 94,202 of them were 2024 or older |
+| **101,048** messages acted on, across **29** applied runs | each one bulk, journalled, reversible |
+| **44,985** judgements by the model · **27,072** decisions by rules | rules are mined from your own corrections — and they are free |
+| **200 corrections → 68 rules**, 67 of them evaluated by Gmail itself | so 36% of all decisions now cost nothing and never drift |
+| **$0.0000449 per judgement** | ≈**$0.045 per 1,000 messages**; a 7,054-message inbox took **$0.17** and about three minutes |
+| **$0.000000** once the rules cover it | a settled pass re-decided 233 messages in **3 seconds**, 0 model calls |
+| **44,985 judgements ≈ $2.02**, best case | and many were served from cache at no cost at all |
+| a 200-message plan cold: **~10 s, $0.0075** · warm: **~1.0 s, $0.0000** | the cache key is the request, so unchanged mail is never bought twice |
+
+That table is the whole argument for the architecture: **the expensive part shrinks as you
+use it**, because every class of mail you decide once becomes a rule that costs nothing
+forever. The model is the on-ramp, not the engine.
+
 ## What it looks like
 
 From a real run over the author's mailbox (7,054 messages still in the inbox; 68 rules;
@@ -193,17 +213,12 @@ Tables: `messages`, `decisions`, `verdicts` (the judgement cache), `message_embe
 `plans`, `plan_items`, `runs`, `run_batches`, `corrections`. A column added after release is
 applied by `ADDED_COLUMNS` in `store.py` — never by dropping the table.
 
-## Cost and speed, measured
+## The judgement cache
 
-| | wall time | model calls | cost |
-|---|---|---|---|
-| cold (every judgement bought) | ~10 s | 183 | $0.0075 |
-| warm (nothing changed) | ~1.0 s | 0 | $0.0000 |
-| a weekly pass over 233 messages, settled | ~3 s | 0 | $0.000000 |
-
-The cache key is the request: the model, the questions as written, and the state the model
+The cache key *is* the request: the model, the questions as written, and the state the model
 was shown. Reword a question, change the model, or add a label yourself — invalidated.
-Nothing else.
+Nothing else. That is why a settled mailbox costs nothing to re-check, and why editing the
+buckets in `decide.py` is the one change that re-buys every answer.
 
 ## Review groups (the digest)
 
@@ -236,6 +251,30 @@ blob. Result: 200 messages → 36 review groups.
 - A Choice always picks an option even when none fit, so a companion Noul and an `unclear`
   bucket guard it.
 - Never ask it to count, order or compute — that is code's job.
+
+### How the model actually behaved, measured
+
+Across **44,985 judgements** on one real mailbox:
+
+| | | |
+|---|---|---|
+| **10,735** | 24% | cleared the 0.8 bar and were **acted on unattended** |
+| **11,611** | 26% | between the bars — reported, not acted on |
+| **22,639** | 50% | **kept**, because it was not sure enough to touch anything |
+| **36,775** (82%) | | of what it chose was `keep`; `trash` was only 5.5% of its answers |
+
+Two things follow, and they are the reason this design is safe to leave running:
+
+- **Half the model's answers never moved a message.** The confidence gate is not decoration:
+  a judgement below `DAMIEN_CONFIDENCE_ASK` is recorded and the message stays where it is.
+- **The model is conservative, and the rules do the deleting.** Its instinct is `keep`
+  (82%); the 27,072 decisions made by rules — mined from your own corrections, and evaluated
+  by Gmail — are where the archive-and-trash volume actually lives. You decide the classes;
+  the model only handles what is left, and only when it is sure.
+
+**200 corrections** were enough to produce **68 rules**, which is **0.44% of judgements**
+touched by hand. That is the whole loop: correct a class once, and it never costs a model
+call again.
 
 ## Status
 

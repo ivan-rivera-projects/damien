@@ -22,7 +22,7 @@ from pathlib import Path
 import typer
 
 from . import __version__
-from .config import Settings, load_settings
+from .config import Settings, load_settings, write_env
 from .decide import DEFAULT_SPEC
 from .doctor import checks as doctor_checks
 from .profile import load_profile, write_profile
@@ -149,12 +149,8 @@ def init(force: bool = typer.Option(False, "--force", help="Overwrite what is al
     else:
         typer.secho(f"kept  {rules_path}", fg="yellow")
 
-    env_path = root / ".env"
-    if not env_path.exists() or force:
-        example = Path(__file__).resolve().parents[2] / ".env.example"
-        if example.exists():
-            env_path.write_text(example.read_text())
-            typer.secho(f"wrote {env_path}", fg="green")
+    env_path, env_written = write_env(root, force=force)
+    typer.secho(f"{'wrote' if env_written else 'kept '} {env_path}", fg="green" if env_written else "yellow")
 
     typer.echo()
     typer.secho("next:", bold=True)

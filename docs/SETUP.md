@@ -1,10 +1,27 @@
 # Setup — your own credentials, start to finish
 
-Damien runs against **your accounts with your keys**. Nothing is shared: there is no hosted
-service, no account to create here, and no key of anyone else's involved. You bring two
-things — a Gmail credential of your own, and (optionally) a model key of your own.
+Damien runs against **your accounts, with your keys**. There is no hosted service, no account
+to create here, and no key of anyone else's involved — you bring a Gmail credential of your
+own and, if you want judgement beyond your rules, a model key of your own. Ten minutes, once.
 
-If anything below is missing, `damien doctor` names it and tells you the fix.
+Nothing is written to your mail until you approve a plan, so you can work through all of this
+without risking a single message. If anything is missing, `damien doctor` names it and tells
+you the fix.
+
+## What it costs to run
+
+| | |
+|---|---|
+| rules — and the Gmail queries behind them | **$0** — Gmail evaluates them itself |
+| the model, before your rules are tuned | **≈$0.045 per 1,000 messages** (measured: $0.0000449 each) |
+| the model, once your mailbox has settled | **$0** — a pass re-checks in seconds from the cache, 0 calls |
+| a 7,054-message inbox, first pass | **$0.17**, about three minutes |
+| a 100,000-message mailbox, all-in | **≈$2** at the measured rate — and much of it served from cache |
+| no model at all (`DAMIEN_JUDGE=rules`) | **$0** forever, and nothing leaves your machine |
+
+No subscription, nothing per seat. Your only costs are your own Google quota (free) and, if
+you want it, your own model credits — and the model's share of the work shrinks as your rules
+grow, because every class of mail you decide once becomes a rule that costs nothing.
 
 ## What you need
 

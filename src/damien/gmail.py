@@ -134,13 +134,43 @@ class Gmail:
         creds = Credentials.from_authorized_user_file(str(self.settings.token_path), list(self.settings.scopes))
         if not creds.valid:
             if creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                self.settings.token_path.write_text(creds.to_json())
-                self.settings.token_path.chmod(0o600)
+                self._refresh(creds)
             else:
                 raise GmailError("token is not usable — run `damien login` again")
         self._creds = creds
         return creds
+
+    def _refresh(self, creds: Any) -> None:
+        """Refresh an access token, and turn the two ways that fails into something a person
+        can act on — both are common, and neither should arrive as a Python traceback.
+
+        A token expires (an OAuth app left in Google's "Testing" status expires refresh
+        tokens after seven days) or a client is deleted from the Cloud console.
+        """
+        from google.auth.transport.requests import Request
+
+        try:
+            creds.refresh(Request())
+        except Exception as exc:                        # google-auth raises several shapes
+            text = str(exc).lower()
+            if "deleted_client" in text or "deleted client" in text:
+                raise GmailError(
+                    "the OAuth client this sign-in was made with has been deleted. Create a new "
+                    "desktop client (docs/SETUP.md step 2), save it as credentials.json, then "
+                    "run `damien login`."
+                ) from exc
+            if "invalid_grant" in text or "invalid_token" in text or "expired" in text or "revoked" in text:
+                raise GmailError(
+                    "the sign-in has expired or was revoked. Run `damien login`. If this keeps "
+                    "happening weekly, publish your OAuth consent screen: an app in Google's "
+                    "\"Testing\" status expires refresh tokens after seven days (docs/SETUP.md)."
+                ) from exc
+            raise GmailError(f"could not refresh the Gmail sign-in: {exc}") from exc
+        try:
+            self.settings.token_path.write_text(creds.to_json())
+            self.settings.token_path.chmod(0o600)
+        except OSError:
+            pass                                        # a read-only home must not break a read
 
     def _token(self) -> str:
         return self._credentials().token
@@ -152,12 +182,10 @@ class Gmail:
         except GmailError:
             return
         if getattr(creds, "refresh_token", None):
-            from google.auth.transport.requests import Request
-
-            creds.refresh(Request())
             try:
-                self.settings.token_path.write_text(creds.to_json())
-                self.settings.token_path.chmod(0o600)
+                self._refresh(creds)
+            except GmailError:
+                return
             except Exception:
                 pass                                           # a read-only home must not kill the run
         else:

@@ -21,6 +21,43 @@ def default_root() -> Path:
     return Path(os.environ.get("DAMIEN_HOME") or (Path.home() / ".damien")).expanduser()
 
 
+ENV_TEMPLATE = """# Damien — your install's settings. Never commit real values.
+
+# The account this install works on (used to label stored rows).
+DAMIEN_ACCOUNT=
+
+# rules      = deterministic only, no model calls, no key, nothing sent anywhere
+# openrouter = Jev through OpenRouter   (needs OPENROUTER_API_KEY)
+# typesafe   = Jev direct from TypeSafe (needs TYPESAFE_API_KEY)
+# fake       = deterministic stand-in, for a demo with no key
+DAMIEN_JUDGE=rules
+DAMIEN_MODEL=typesafe/jev-1.13
+OPENROUTER_API_KEY=
+# TYPESAFE_API_KEY=
+
+# Unset = one SQLite file at ~/.damien/damien.db. Set = Postgres.
+# DAMIEN_DB_URL=postgres://user:password@127.0.0.1:5432/damien
+
+# Labels the model may never act against: anything carrying one is kept.
+DAMIEN_PROTECT_LABELS=ACTION REQUIRED,WAITING FOR,Bills
+"""
+
+
+def write_env(root: Path | str, *, force: bool = False) -> tuple[Path, bool]:
+    """Write the settings template, 0600 (it will hold a key). Never clobbers without force.
+
+    The template lives here rather than in a file beside the checkout, because an install
+    from a wheel has no checkout — that bug made `init` silently skip the .env.
+    """
+    path = Path(root) / ".env"
+    if path.exists() and not force:
+        return path, False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(ENV_TEMPLATE)
+    path.chmod(0o600)
+    return path, True
+
+
 def load_env_file(path: Path) -> None:
     """Minimal KEY=VALUE loader. Real values are never printed; the file is gitignored."""
     if not path.is_file():
