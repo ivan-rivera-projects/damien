@@ -83,8 +83,8 @@ Nothing in Gmail changed until that last command, and `run undo 2ba1162fdb34` re
 ## Install
 
 ```bash
-uvx --from git+https://github.com/ivan-rivera-projects/damien damien --help   # try it without installing
-pipx install git+https://github.com/ivan-rivera-projects/damien               # or install it
+uvx damien --help                  # try it without installing
+pipx install damien                # or install it ('damien[pg,vectors]' for Postgres and review groups)
 ```
 
 From a checkout, if you want to hack on it:

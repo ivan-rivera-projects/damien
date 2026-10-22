@@ -34,9 +34,9 @@ grow, because every class of mail you decide once becomes a rule that costs noth
 ## 1. Install
 
 ```bash
-uvx --from git+https://github.com/ivan-rivera-projects/damien damien --help
-# or, permanently:
-pipx install git+https://github.com/ivan-rivera-projects/damien
+uvx damien --help
+# or, permanently (add extras as needed: 'damien[pg,vectors]'):
+pipx install damien
 # or, from a checkout you want to hack on:
 python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 ```
