@@ -31,7 +31,7 @@ You've tried *one of those AI apps* that wanted your password, your data and you
 
 ---
 
-## 🌈 INTRODUCING... DAMIEN! 🌈
+## ⭐ INTRODUCING... DAMIEN! ⭐
 
 *\[Full color. Synth stab. A terminal glows.\]*
 
