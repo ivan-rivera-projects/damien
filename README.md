@@ -9,6 +9,16 @@ platform. That one was four services, three MCP front-ends, two tool registries 
 forty-nine tools, with keyword lists standing in for judgment and jobs living in two
 in-memory dicts. This one is one package, one binary, and one SQLite file or Postgres.
 
+**The original was torn down on 2026-10-21.** Its AWS resources — three Lambdas, four
+DynamoDB tables, an IAM role and its policies, all in account `954976299507` (a different
+account from CONSPIRE's, which it never touched) — were deleted; ~744 MB of local copies
+went, plus a whole second copy that was sitting in iCloud Drive (the platform, its design
+documents, the editable Pages originals of them, and the logo artwork); and every client
+still pointing at it was cleaned out — Claude Desktop's MCP config, which launched its
+server on **every start**, plus Kiro's and Cursor's references and the old MCP logs. Its
+code remains on GitHub at `ivan-rivera-projects/{Damien-Email-Wrestler,damien-cli-project,
+damien_mcp_server,reference-servers}`; nothing of it runs, and no archive of it is kept.
+
 Measured on a real 200-message inbox: **0.99 s and $0.0000 to re-plan unchanged mail**,
 **~10 s and $0.0075 to judge it for the first time**, 200 messages collapsed to ~36
 review groups, and every write applied in bulk (1,000 ids per call) and undoable.
