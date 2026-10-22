@@ -54,14 +54,16 @@ damien rules list
 ```
 
 Every sender the plan decided the same way at least 90% of the time becomes a **rule**: free
-from then on, deterministic, no model call, no drift. This is the difference between a tool
-that costs money every week and one that costs money once.
+from then on, deterministic, no model call, no drift. A sender is the domain, or the full
+address for freemail (gmail.com, outlook.com, …); a sender whose mail you corrected to
+something else is refused. This is the difference between a tool that costs money every
+week and one that costs money once.
 
 For a group you reviewed by hand, express it as rules directly:
 
 ```bash
-damien plan digest <plan_id> --min-size 5      # note the group number
-damien rules from-group <plan_id> -g 3 --dry-run
+damien plan digest <plan_id> --min-size 5      # note the group, printed as N:fp
+damien rules from-group <plan_id> -g 3:a1b2c3 --dry-run   # refuses if the group changed
 ```
 
 ## 4. Check the arithmetic
@@ -77,8 +79,9 @@ the rules carry it. If it is not, you have senders worth turning into rules (ste
 ## 5. Then let it run itself
 
 ```bash
-./scripts/damien-pass.sh weekly --dry-run     # builds and reports; writes nothing
-./scripts/damien-pass.sh weekly               # applies what is deterministic, reports the rest
+damien judge eval                # once: calibrate where the model can be trusted
+damien pass weekly --dry-run     # builds and reports; writes nothing
+damien pass weekly               # applies what is deterministic, reports the rest
 ```
 
 Schedule it — **every Monday for the week just gone, and on the 1st for the month just
@@ -86,13 +89,15 @@ gone** — with cron, launchd, or your agent of choice. The monthly window overl
 weeklies on purpose: already-decided mail is cached and free, and the second look catches a
 week you skipped.
 
-The script applies **only what is deterministic**: your rules, your own corrections, and the
-model where it was at least 0.9 sure. Everything below that is a report with a plan id and
-the exact command to apply it — never applied for you. That is the whole safety argument of
-running it unattended, and it is in [`RUNBOOK.md`](RUNBOOK.md) in full.
+The pass applies **only what is deterministic**: your rules, your own corrections, and the
+model at or above the threshold `damien judge eval` calibrated (uncalibrated, rules and
+corrections only). Everything else is reported as waiting, with a plan id and the exact
+command to apply it — never applied for you. That is the whole safety argument of running it
+unattended, and it is in [`RUNBOOK.md`](RUNBOOK.md) in full.
 
 ## What you should never see
 
-- mail **sent** by Damien — there is no send path and no send scope;
+- mail **sent** by Damien — there is no send path: no code in Damien sends, drafts-and-sends,
+  or forwards (the `gmail.modify` scope technically permits sending; Damien never calls it);
 - anything **permanently deleted** — `trash` is a label, and Gmail holds it for 30 days;
 - a write you did not approve — `plan apply` refuses without a token, and refuses twice.

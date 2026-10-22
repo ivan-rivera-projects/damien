@@ -21,24 +21,43 @@ from .models import Action, Message
 # ALARM: the message says something is already wrong — a failure, a suspension, a
 # demand. Filing that anywhere, under any action, is losing the one mail a person
 # must see. "Action required: Invoice overdue" was being labelled Receipts.
-ALARM = re.compile(
-    r"\b(overdue|past due|unsuccessful|failed|declined|insufficient|suspend|suspended|locked|"
-    r"unauthori[sz]ed|breach|action required|final notice|terminated|rejected|disputed|"
-    r"alarm|at risk|will be suspended)\b",
-    re.IGNORECASE,
+ALARM_TERMS: tuple[str, ...] = (
+    "overdue", "past due", "unsuccessful", "failed", "declined", "insufficient", "suspend", "suspended",
+    "locked", "unauthorized", "unauthorised", "breach", "action required", "final notice", "terminated",
+    "rejected", "disputed", "alarm", "at risk", "will be suspended",
 )
 
 # CONSEQUENTIAL: money, deadlines, accounts and legal matters. A model (or a rule
 # this tool shipped) may not take one of these *out of the inbox* — but may label it,
 # because filing an ordinary invoice under Receipts is what that label is for.
-CONSEQUENTIAL = re.compile(
-    r"\b(invoice|payment|paid|refund|charge|billing|past due|overdue|insufficient|declined|"
-    r"expire|expires|expiring|expiry|renew|renewal|deadline|action required|"
-    r"verify|verification|suspend|suspended|locked|unauthori[sz]ed|breach|security|"
-    r"sign-in|signin|password|one-time|2fa|mfa|"
-    r"legal|contract|agreement|lawsuit|cease and desist|tax|irs|wire|transfer)\b",
-    re.IGNORECASE,
+CONSEQUENTIAL_TERMS: tuple[str, ...] = (
+    "invoice", "payment", "paid", "refund", "charge", "billing", "past due", "overdue", "insufficient",
+    "declined", "expire", "expires", "expiring", "expiry", "renew", "renewal", "deadline", "action required",
+    "verify", "verification", "suspend", "suspended", "locked", "unauthorized", "unauthorised", "breach",
+    "security", "sign-in", "signin", "password", "one-time", "2fa", "mfa",
+    "legal", "contract", "agreement", "lawsuit", "cease and desist", "tax", "irs", "wire", "transfer",
 )
+
+
+def _words(terms: Sequence[str]) -> re.Pattern[str]:
+    """Plain word lists (so a Gmail query can exclude the same words) compiled once."""
+    return re.compile(r"\b(" + "|".join(re.escape(t) for t in terms) + r")\b", re.IGNORECASE)
+
+
+ALARM = _words(ALARM_TERMS)
+CONSEQUENTIAL = _words(CONSEQUENTIAL_TERMS)
+
+# The importance Score's levels, described, never numeric-only. They live here, not in
+# jev.py, because the guardrail reads the score against the scale and jev imports stakes.
+IMPORTANCE_LEVELS = [
+    "nothing to do with the reader and needs no action",
+    "background information the reader may want later",
+    "worth the reader's attention this week",
+    "needs the reader's attention now, or is from a person who does",
+]
+IMPORTANCE_MAX = len(IMPORTANCE_LEVELS) - 1
+# "Worth attention this week" or above: two thirds of the scale, whatever its length.
+IMPORTANT_AT = IMPORTANCE_MAX * 2 / 3
 
 # Software, not a person. Deliberately broad: the point is to avoid *claiming* a
 # human wrote something.
@@ -109,6 +128,6 @@ def stake_floor(message: Message, *, machine_sent: float | None = None, importan
             return "it is a reply, from someone who is not a bulk sender"
         if machine_sent is not None and machine_sent < 0.3:
             return "it reads as written by a person, not by software"
-    if importance is not None and importance >= 2.0:
-        return f"the model rated it important ({importance:.1f} of 3) while filing it away"
+    if importance is not None and importance >= IMPORTANT_AT - 1e-9:
+        return f"the model rated it important ({importance:.1f} of {IMPORTANCE_MAX}) while filing it away"
     return None

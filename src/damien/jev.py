@@ -30,25 +30,18 @@ import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
-from .config import Settings
+from .config import DEFAULT_URL, KEY_REQUIRED, Settings
 from .decide import JudgementSpec, Verdict
 from .models import Message
+from .stakes import IMPORTANCE_LEVELS
 
-TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
+TYPESAFE_URL = DEFAULT_URL["typesafe"]
 OPENROUTER_SYSTEMONE_URL = "https://openrouter.ai/api/v1/systemone"
-OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
-
-# The four levels for the importance Score: ordered, described, never numeric-only.
-IMPORTANCE_LEVELS = [
-    "nothing to do with the reader and needs no action",
-    "background information the reader may want later",
-    "worth the reader's attention this week",
-    "needs the reader's attention now, or is from a person who does",
-]
-
+OPENROUTER_DECISIONS_URL = DEFAULT_URL["openrouter"]
 
 def message_state(message: Message, context: str = "", label_names: dict[str, str] | None = None) -> dict[str, Any]:
     """Small on purpose: headers + snippet. Jev is weakened by irrelevant material.
@@ -139,14 +132,17 @@ def parse_answer(message_id: str, answers: dict[str, Any]) -> Verdict:
 class JevJudge:
     """A judge backed by a System One model. One request per message, pooled."""
 
-    def __init__(self, settings: Settings, spec: JudgementSpec, *, concurrency: int = 8,
+    def __init__(self, settings: Settings, spec: JudgementSpec, *, concurrency: int | None = None,
                  transport: httpx.BaseTransport | None = None, url: str | None = None,
                  backend: str | None = None, cache: Any = None):
         self.settings = settings
         self.spec = spec
-        self.concurrency = max(1, min(concurrency, 8))     # the docs cap the public endpoint near eight
+        # DAMIEN_JUDGE_CONCURRENCY: the public endpoints cap near eight, a local server may take more.
+        self.concurrency = max(1, concurrency or settings.judge_concurrency)
         self.name = backend or settings.judge
-        self.url = url or (TYPESAFE_URL if self.name == "typesafe" else OPENROUTER_DECISIONS_URL)
+        self.url = (url or settings.judge_url
+                    or (TYPESAFE_URL if self.name == "typesafe" else OPENROUTER_DECISIONS_URL))
+        self.failed: set[str] = set()          # ids whose judgment raised this run — never cached
         self._client = httpx.Client(timeout=60.0, transport=transport)
         self.calls = 0
         self.cached = 0
@@ -155,8 +151,9 @@ class JevJudge:
 
     # ---- transport ----------------------------------------------------
     def _headers(self) -> dict[str, str]:
-        key = self.settings.api_key or ""
-        headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json"}
+        if self.settings.api_key:                  # a local judge may take no key at all
+            headers["Authorization"] = f"Bearer {self.settings.api_key}"
         if self.url == TYPESAFE_URL:
             headers["TypeSafe-Danger-Zone-Long-Context"] = "true"
         return headers
@@ -183,7 +180,12 @@ class JevJudge:
                     cost = (data.get("usage") or {}).get("cost")
                     if isinstance(cost, (int, float)):
                         self.spent_usd += float(cost)
-                    return parse_answer(message.id, data.get("answers") or {})
+                    answers = data.get("answers") or {}
+                    # A chat model behind the same URL answers 200 with no confidence. Treating
+                    # that as "unsure" would cache it forever; it is a failure (J6).
+                    if (answers.get("bucket") or {}).get("confidence") is None:
+                        raise RuntimeError("backend returned no confidence — not a decision model")
+                    return parse_answer(message.id, answers)
                 if resp.status_code in (429, 500, 502, 503, 504, 529):
                     last = RuntimeError(f"{resp.status_code}: {resp.text[:200]}")
                 elif resp.status_code in (401, 402, 403):
@@ -200,6 +202,7 @@ class JevJudge:
         a question's wording, or the person's own labels on the message all invalidate it."""
         payload = "|".join([
             self.settings.model,
+            urlparse(self.url).hostname or "",     # the same model id on another host is another model
             json.dumps(build_questions(self.spec), sort_keys=True, default=str),
             json.dumps(message_state(message, context, label_names), sort_keys=True, default=str),
         ])
@@ -209,6 +212,8 @@ class JevJudge:
     def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
               label_names: dict[str, str] | None = None) -> list[Verdict]:
         self.label_names = label_names or {}
+        # `failed` accumulates for the whole pass: decide_all calls this once per chunk, and
+        # build_plan reads it afterwards to keep failed messages out of escalation.
         keys = {m.id: self.verdict_key(m, context, label_names) for m in messages}
         by_id: dict[str, Verdict] = {}
         todo: list[Message] = []
@@ -233,6 +238,12 @@ class JevJudge:
                     except Exception as exc:              # one bad message never kills a plan
                         verdict = Verdict(message_id=message.id, choice="unclear", confidence=0.0,
                                           rationale=f"judgment failed: {str(exc)[:120]}")
+                        self.failed.add(message.id)
+                        by_id[message.id] = verdict
+                        # A failure is about this call (402, outage), not the message: caching
+                        # it would keep the message unjudged after the key is topped up (L1).
+                        continue
+                    self.failed.discard(message.id)
                     by_id[message.id] = verdict
                     if self.cache:
                         self.cache.put(keys[message.id], message.id, self.settings.model,
@@ -250,6 +261,7 @@ class FakeJudge:
         self.calls = 0
         self.cached = 0
         self.spent_usd = 0.0
+        self.failed: set[str] = set()
 
     def judge(self, messages: Sequence[Message], buckets: dict[str, str], *, context: str = "",
               label_names: dict[str, str] | None = None) -> list[Verdict]:
@@ -279,9 +291,15 @@ def _heuristic(message: Message) -> tuple[str, float]:
 
 
 def make_judge(settings: Settings, spec: JudgementSpec, cache: Any = None) -> JevJudge | FakeJudge | None:
-    """Pick a judge from settings. `rules` means no judge at all — rules only."""
+    """Pick a judge from settings. `rules` means no judge at all — rules only.
+
+    A backend missing what it needs (a key, or a URL for `local`) is also no judge:
+    the run degrades to rules and keeps the rest, and doctor names the missing piece.
+    """
     if settings.judge == "fake":
         return FakeJudge()
-    if settings.judge in ("typesafe", "openrouter") and settings.api_key:
+    if settings.judge in KEY_REQUIRED and settings.api_key:
+        return JevJudge(settings, spec, cache=cache)
+    if settings.judge == "local" and settings.judge_url:
         return JevJudge(settings, spec, cache=cache)
     return None

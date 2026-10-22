@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -13,34 +14,51 @@ from damien.config import Settings
 from damien.gmail import Gmail
 from damien.store import Store
 
+_TOKEN = re.compile(r'-?(?:\w+:)?(?:\{[^}]*\}|\([^)]*\)|"[^"]*"|[^\s{}()]+)')
 
-def _matches(message: dict, query: str) -> bool:
+
+def _matches(message: dict, query: str, label_names: dict[str, str] | None = None) -> bool:
     """Gmail's search semantics, in miniature: every token must hold.
 
     Good enough that a test can tell `in:inbox label:X` from a bare `label:X` —
-    which is how the fake caught a rule query that had lost its scope.
+    which is how the fake caught a rule query that had lost its scope. `{a b}` is an
+    OR group, `(a b)` an AND group, and a field before either applies to every term.
     """
+    return all(_token_holds(message, token, label_names or {}) for token in _TOKEN.findall(query or ""))
+
+
+def _token_holds(message: dict, token: str, label_names: dict[str, str], field_default: str = "") -> bool:
     labels = message.get("labelIds", [])
     blob = json.dumps(message).lower()
-    for token in (query or "").split():
-        negative = token.startswith("-")
-        word = token[1:] if negative else token
-        field, _, value = word.partition(":")
-        if field == "in":
-            hit = ("INBOX" in labels) if value == "inbox" else (value.upper() in labels)
-        elif field == "label":
-            hit = value in labels or value.lower() in blob
-        elif field == "is":
-            hit = value.upper() in labels
-        elif field in ("older_than", "newer_than"):
-            hit = True                                  # time is not modelled by the fake
-        elif field in ("from", "to", "subject"):
-            hit = value.lower() in blob
-        else:
-            hit = word.lower() in blob
-        if hit == negative:                             # a positive that missed, or a negative that hit
-            return False
-    return True
+    negative = token.startswith("-")
+    word = token[1:] if negative else token
+    field, sep, value = word.partition(":")
+    if not sep or field.startswith(('"', "{", "(")):
+        field, value = field_default, word
+    if value[:1] in "{(" and value:
+        inner = [t if ":" in t.split('"')[0] or not field else f"{field}:{t}" for t in _TOKEN.findall(value[1:-1])]
+        results = (_token_holds(message, t, label_names) for t in inner)
+        hit = any(results) if value[0] == "{" else all(results)
+        return hit != negative
+    value = value.strip('"')
+    if field == "in":
+        hit = ("INBOX" in labels) if value == "inbox" else (value.upper() in labels)
+    elif field == "label":
+        names = {re.sub(r"[\s/]+", "-", label_names.get(lid, lid)).lower() for lid in labels}
+        hit = value in labels or value.lower() in names or value.lower() in blob
+    elif field == "is":
+        hit = value.upper() in labels
+    elif field in ("older_than", "newer_than"):
+        hit = True                                  # time is not modelled by the fake
+    elif field == "subject":
+        subject = next((h["value"] for h in message.get("payload", {}).get("headers", [])
+                        if h["name"] == "Subject"), "")
+        hit = re.search(rf"(?<![0-9a-z]){re.escape(value.lower())}(?![0-9a-z])", subject.lower()) is not None
+    elif field in ("from", "to"):
+        hit = value.lower() in blob
+    else:
+        hit = value.lower() in blob
+    return hit != negative
 
 
 class FakeGmailState:
@@ -53,6 +71,7 @@ class FakeGmailState:
         self.mods: list[dict] = []                  # batchModify bodies
         self.queries: list[str] = []                 # every q= that went out
         self.fail_mods = 0                          # fail the next N batchModify calls
+        self.live_labels = False                    # apply batchModify label changes to messages
         self.fail_status = 400
         self.result_estimate = 0
         self._next_label = 2
@@ -95,11 +114,17 @@ class FakeGmailState:
                 return httpx.Response(self.fail_status, json={"error": {"message": "simulated failure"}})
             body = json.loads(request.content or b"{}")
             self.mods.append(body)
+            if self.live_labels:
+                for mid in body.get("ids", []):
+                    if mid in self.messages:
+                        have = self.messages[mid]["labelIds"]
+                        have[:] = [x for x in have if x not in body.get("removeLabelIds", [])]
+                        have.extend(x for x in body.get("addLabelIds", []) if x not in have)
             return httpx.Response(204)
         if path.endswith("/messages"):
             raw_q = request.url.params.get("q", "") or ""
             self.queries.append(raw_q)
-            ids = [mid for mid, m in self.messages.items() if _matches(m, raw_q)]
+            ids = [mid for mid, m in self.messages.items() if _matches(m, raw_q, self.labels)]
             if int(request.url.params.get("maxResults", "100")) == 1 and self.result_estimate:
                 return httpx.Response(200, json={"messages": [{"id": next(iter(self.messages), "x")}],
                                                  "resultSizeEstimate": self.result_estimate})

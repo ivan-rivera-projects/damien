@@ -54,7 +54,7 @@ def test_to_query_translates_only_the_certain_subset():
     assert to_query(Rule(id="a", name="a", action=Action.archive,
                          match=[Condition(field="from", op="contains", value="news@x.example")])) == "from:news@x.example"
     assert to_query(Rule(id="b", name="b", action=Action.archive,
-                         match=[Condition(field="label", op="equals", value="CATEGORY_PROMOTIONS")])) == "label:CATEGORY_PROMOTIONS"
+                         match=[Condition(field="label", op="equals", value="CATEGORY_PROMOTIONS")])) == "label:category_promotions"
     assert to_query(Rule(id="c", name="c", action=Action.archive,
                          match=[Condition(field="age_days", op="gt", value=365)])) == "older_than:365d"
     assert to_query(Rule(id="d", name="d", action=Action.archive,
@@ -167,7 +167,7 @@ def test_a_category_dominant_group_becomes_one_category_rule():
     rules, why = mint_rules(messages, Action.trash, None)
     assert len(rules) == 1
     assert rules[0].match[0].value == "CATEGORY_PROMOTIONS"
-    assert to_query(rules[0]) == "label:CATEGORY_PROMOTIONS"          # Gmail evaluates it, not us
+    assert to_query(rules[0]) == "label:category_promotions"          # Gmail evaluates it, not us
     assert "Gmail's 'promotions' category" in why
 
 
@@ -273,3 +273,35 @@ def test_a_broader_rule_that_runs_first_can_shadow_a_narrower_one():
     same_action = Rule(id="s", name="s", action=Action.keep,
                        match=[Condition(field="from", op="contains", value="sales@notice.alibaba.com")])
     assert shadowed([broad, same_action]) == []      # agreeing is harmless
+
+
+def test_snippet_and_any_text_do_not_translate():
+    """L4: a bare Gmail term searches the whole body, so it matches mail the rule would not."""
+    for field in ("snippet", "any"):
+        rule = Rule(id="s", name="s", action=Action.trash, match=[Condition(field=field, op="contains", value="sale")])
+        assert to_query(rule) is None
+
+
+def test_a_label_with_spaces_is_one_query_token():
+    rule = Rule(id="l", name="l", action=Action.archive,
+                match=[Condition(field="label", op="equals", value="Action Required/Bills")])
+    assert to_query(rule) == "label:action-required-bills"
+
+
+def test_any_of_translates_to_an_or_group_only_when_every_group_does():
+    from damien.rules import default_rules
+    rules = {r.id: r for r in default_rules()}
+    assert to_query(rules["r-receipts"]) == ('{(subject:receipt) (subject:invoice) '
+                                              '(subject:"order confirmation") (subject:"payment received")}')
+    mixed = Rule(id="m", name="m", action=Action.archive,
+                 any_of=[[Condition(field="from", op="contains", value="a.example")],
+                         [Condition(field="subject", op="regex", value="^x")]])
+    assert to_query(mixed) is None
+
+
+def test_sender_key_is_the_domain_except_on_freemail():
+    from damien.rules import sender_key
+    assert sender_key("Billing@Shop.example") == "shop.example"
+    assert sender_key("alex@gmail.com") == "alex@gmail.com"
+    assert sender_key("x@yahoo.co.uk") == "x@yahoo.co.uk"
+    assert sender_key(None) is None

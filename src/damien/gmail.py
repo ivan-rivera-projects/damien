@@ -17,6 +17,7 @@ pass costs about fifteen requests instead of five thousand:
 
 from __future__ import annotations
 
+import os
 import random
 import threading
 import time
@@ -120,8 +121,7 @@ class Gmail:
         flow = InstalledAppFlow.from_client_secrets_file(str(self.settings.credentials_path), list(self.settings.scopes))
         creds = flow.run_local_server(port=0, open_browser=open_browser) if open_browser else flow.run_console()
         self.settings.token_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings.token_path.write_text(creds.to_json())
-        self.settings.token_path.chmod(0o600)
+        _write_private(self.settings.token_path, creds.to_json())
         self._creds = creds
         return self.profile().get("emailAddress", "")
 
@@ -168,8 +168,7 @@ class Gmail:
                 ) from exc
             raise GmailError(f"could not refresh the Gmail sign-in: {exc}") from exc
         try:
-            self.settings.token_path.write_text(creds.to_json())
-            self.settings.token_path.chmod(0o600)
+            _write_private(self.settings.token_path, creds.to_json())
         except OSError:
             pass                                        # a read-only home must not break a read
 
@@ -406,6 +405,17 @@ def _exclude_spam_and_trash(query: str) -> str:
     if not any(token in q for token in ("in:spam", "in:trash", "in:anywhere")):
         q = f"{q} -in:spam -in:trash"
     return q
+
+
+def _write_private(path: Any, text: str) -> None:
+    """Write a secret that is 0600 from its first byte: write-then-chmod leaves a window
+    in which the refresh token is world-readable under a default umask."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)                      # an existing file keeps its old mode otherwise
+        os.write(fd, text.encode())
+    finally:
+        os.close(fd)
 
 
 def _chunks(items: list, size: int) -> Iterator[list]:

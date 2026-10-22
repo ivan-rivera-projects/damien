@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import Settings
+from .calibrate import act_threshold
+from .config import KEY_FOR, KEY_REQUIRED, Settings
 from .decide import DEFAULT_SPEC
 from .gmail import Gmail, GmailError
 from .profile import load_profile
@@ -17,8 +18,6 @@ from .rules import Rule, shadowed
 from .store import open_store
 
 OK, WARN, FAIL = "ok", "warn", "fail"
-
-KEY_FOR = {"openrouter": "OPENROUTER_API_KEY", "typesafe": "TYPESAFE_API_KEY"}
 
 
 @dataclass(frozen=True)
@@ -75,15 +74,26 @@ def checks(settings: Settings, *, gmail: Gmail | None = None, store=None,
 
     # the judge: with no key it still works, it just keeps everything
     mode = settings.judge
+    host = settings.judge_host()
+    where = f"{host} (local — nothing leaves this machine)" if settings.judge_is_local() else host
     if mode == "rules":
         out.append(Check(OK, "judge", "rules only — no model, no key, nothing sent to a third party"))
+    elif mode == "local" and not settings.judge_url:
+        out.append(Check(WARN, "judge",
+                         f"local selected with no URL: unresolved mail will be kept, not judged. "
+                         f"Set DAMIEN_JUDGE_URL in {root / '.env'}, or use DAMIEN_JUDGE=rules"))
+    elif mode in KEY_REQUIRED and not settings.api_key:
+        out.append(Check(WARN, "judge",
+                         f"{mode} selected with no key: unresolved mail will be kept, not judged. "
+                         f"Set {KEY_FOR[mode]} in {root / '.env'}, or use DAMIEN_JUDGE=rules"))
     elif mode in KEY_FOR:
-        if settings.api_key:
-            out.append(Check(OK, "judge", f"{mode} · model {settings.model} · key present (not shown)"))
-        else:
-            out.append(Check(WARN, "judge",
-                             f"{mode} selected with no key: unresolved mail will be kept, not judged. "
-                             f"Set {KEY_FOR[mode]} in {root / '.env'}, or use DAMIEN_JUDGE=rules"))
+        key = "key present (not shown)" if settings.api_key else "no key"
+        out.append(Check(OK, "judge", f"{mode} · model {settings.model} · {where} · {key}"))
+        act = act_threshold(settings)
+        out.append(Check(OK, "calibration", f"acts unattended at confidence ≥ {act:.2f}") if act is not None
+                     else Check(WARN, "calibration",
+                                "uncalibrated: the scheduled pass applies rules and your corrections only "
+                                "— run damien judge eval"))
     else:
         out.append(Check(OK, "judge", mode))
 

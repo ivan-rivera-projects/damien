@@ -156,6 +156,7 @@ def decide_message(
         message_id=message.id, action=bucket.action, label=bucket.label, source=Source.jev,
         rationale=verdict.rationale or bucket.description, confidence=verdict.confidence,
         probabilities=verdict.probabilities, model=model, keep_in_inbox=bucket.keep_in_inbox,
+        signals=verdict.signals,
     )
     # The guardrail: the model may not quietly file away money, deadlines or a person.
     if decision.action is not Action.keep:

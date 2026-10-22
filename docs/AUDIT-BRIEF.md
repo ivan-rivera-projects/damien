@@ -24,8 +24,8 @@ change. Do not report style, naming or "consider adding…" items unless they hi
 |---|---|---|---|
 | 1 | **No permanent delete.** `trash` is a label; the code cannot bypass the trash. | `gmail.py` (`trash`, `modify`), the scope in `config.py` | grep for any permanent-delete or `messages.delete` path; check what the scope actually allows (Google: `gmail.modify` cannot permanently delete — verify that claim holds for every call the tool makes) |
 | 2 | **Nothing is sent.** No send path exists. | the whole of `src/damien` | grep for `send`, `messages/send`, `drafts`; note that the *scope* permits sending, so check no code path could reach it, including via a crafted rule or plan |
-| 3 | **No write without approval.** `plan apply` refuses without the token minted by `plan approve`, and refuses a plan already applied. | `plan.apply_plan`, `store.approve_plan` | forge a token; re-apply a `partly_applied` plan; apply with `--only` twice; apply an undone run's plan |
-| 4 | **Every write is journalled with its inverse before it lands**, so `run undo` restores exactly what was moved. | `plan._perform` (inverse per action), `store.journal_batch`, `run.undo_run` | check every `Action` has a correct inverse (especially `label` with `keep_in_inbox` and `mark_read_when_filed`, and `trash`); kill a run mid-batch and undo; undo twice |
+| 3 | **No write without approval.** `plan apply` refuses without the token minted by `plan approve` (printed once; only its sha256 hash is stored; re-approving mints a fresh one), and refuses a plan already applied. | `plan.apply_plan`, `store.approve_plan` | forge a token; look for the raw token in the store or in `plan show`; re-apply a `partly_applied` plan; apply with `--only` twice; apply an undone run's plan |
+| 4 | **Every write is journalled before it lands**: each batch row is written `pending` before the Gmail call and flipped to `done` after, with the state recorded at plan time (INBOX, UNREAD, label), so `run undo` restores exactly that state (fixed inverse only for pre-0.4.0 plans). | `plan._perform`, `store.journal_batch`, `run.undo_run` | kill a run mid-batch and undo (pending rows must be replayed); undo twice (must refuse); resume a run with a different `--only`/`--min-confidence` filter; check `label` with `keep_in_inbox` and `mark_read_when_filed`, and `trash` |
 | 5 | **A keep is never written to.** A `keep` decision is not performed at all. | `plan._group_items` (skips keep), `apply_plan` | a plan that is all keeps; a keep with `mark_read_when_filed=1`; a keep with a label |
 | 6 | **Kept mail is never marked read; filed mail may be.** | `plan._perform` (`mark_read`), `gmail.add_label` | a label that keeps a message in the inbox with `mark_read` set |
 | 7 | **The body is never sent to the judge unless `DAMIEN_READ_BODIES=on_escalation`**, and then only for messages the snippet could not settle, newest text only, attachments never opened. | `plan.build_plan` (the escalation block), `mime.payload_text` | a part with a `filename`; a multipart with an inline text part; check what `message_state` actually contains and when |
@@ -48,10 +48,10 @@ defect this project can ship, because it is a promise about someone's private ma
   attachment"; "your account address, message ids … never sent" — **verify against
   `message_state` line by line**; "`trash` is a label, and Gmail clears it after 30 days".
 - `docs/SETUP.md` — the scope and what it cannot do; the testing-mode expiry claim.
-- `docs/RUNBOOK.md` — what an unattended pass applies (`rules`, corrections, model at ≥0.9);
-  "the rest of the plan is still approved".
+- `docs/RUNBOOK.md` — what `damien pass` applies unattended (rules, person corrections, model
+  decisions at ≥ the calibrated threshold from `damien judge eval`); everything else waits.
 - `docs/COMMANDS.md` — what each command writes and what it costs.
-- `docs/SKILL-PROMPT.md` — what an agent is told to do, and the never-do list.
+- `src/damien/skill/SKILL.md` — what an agent is told to do, and the never-do list.
 
 ## 3. Surfaces where a defect hides well
 
@@ -60,10 +60,10 @@ defect this project can ship, because it is a promise about someone's private ma
    judgements below `confidence_ask`), that a message is read at most once, that `""` and
    `None` mean different things, and that a body cannot be attributed to the wrong message
    (the `zip`/`by_position` class of bug is real here — it was once worth 2,180 decisions).
-2. **The shell pass** (`scripts/damien-pass.sh`). It parses CLI output with `grep`/`awk`
-   (`grep -oE '[0-9]+ message'`, `head -1 | awk '{print $2}'`). If the CLI's wording changes,
-   this breaks **silently** and reports a wrong number. Check the failure modes, `set -euo
-   pipefail` behaviour, and the dry-run/apply branches.
+2. **The scheduled pass** (`src/damien/passes.py`, `damien pass weekly|monthly`). It builds a
+   plan, approves it in-process and applies only the certain part. Check the window bounds,
+   that nothing below the calibrated threshold (or any model decision when uncalibrated) is
+   applied, the `--dry-run` branch, and that the report counts match what was written.
 3. **The store's migrations** (`store.ADDED_COLUMNS`, the two dialects). Three columns have
    been added since the first release (`list_id`, `keep_in_inbox`, `body_excerpt`, and the plan
    cost columns). Check that a database created by an older version still works, in **both**

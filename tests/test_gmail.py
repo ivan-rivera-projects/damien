@@ -221,3 +221,24 @@ def test_restoring_a_message_is_the_inverse_of_trashing_it(gmail: Gmail, fake):
     assert fake.mods[0]["addLabelIds"] == ["TRASH"]
     gmail.untrash(["m1"])
     assert fake.mods[-1] == {"ids": ["m1"], "addLabelIds": ["INBOX"], "removeLabelIds": ["TRASH"]}
+
+
+def test_the_token_file_is_private_from_its_first_byte(tmp_path):
+    """write-then-chmod leaves the refresh token world-readable for a moment; the file
+    must be created 0600, and an existing looser file tightened."""
+    import os
+    import stat
+
+    from damien.gmail import _write_private
+    old = os.umask(0)                                   # the worst umask: write_text would give 0666
+    try:
+        fresh = tmp_path / "token.json"
+        _write_private(fresh, '{"refresh_token": "r"}')
+        assert stat.S_IMODE(fresh.stat().st_mode) == 0o600
+        loose = tmp_path / "old.json"
+        loose.write_text("x" * 100)
+        loose.chmod(0o644)
+        _write_private(loose, "{}")
+        assert stat.S_IMODE(loose.stat().st_mode) == 0o600 and loose.read_text() == "{}"
+    finally:
+        os.umask(old)

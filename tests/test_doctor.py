@@ -65,3 +65,22 @@ def test_a_broken_profile_blocks_and_says_which_file(settings, tmp_path):
     got = by_name(checks(settings, rules=[]))
     assert got["profile"].status == FAIL
     assert "profile.json" in got["profile"].detail
+
+
+def test_a_local_judge_without_a_url_warns(settings):
+    got = by_name(checks(without(settings, judge="local", judge_url=None), rules=[]))
+    assert got["judge"].status == WARN and "DAMIEN_JUDGE_URL" in got["judge"].detail
+
+
+def test_a_local_judge_says_nothing_leaves(settings):
+    got = by_name(checks(without(settings, judge="local", judge_url="http://localhost:8080/x",
+                                 model="typesafe/jev-1.13"), rules=[]))
+    assert "nothing leaves this machine" in got["judge"].detail
+    assert got["calibration"].status == OK and "0.90" in got["calibration"].detail
+
+
+def test_an_uncalibrated_model_warns_and_names_the_eval(settings):
+    got = by_name(checks(without(settings, judge="openrouter", api_key="k", model="perplexity/pplx-decider-flash-v1.2"),
+                         rules=[]))
+    assert got["judge"].status == OK and "openrouter.ai" in got["judge"].detail
+    assert got["calibration"].status == WARN and "damien judge eval" in got["calibration"].detail

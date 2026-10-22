@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -160,10 +160,41 @@ _SAFE: dict[tuple[str, str], str] = {
     ("to", "contains"): "to",
     ("subject", "contains"): "subject",
     ("subject", "words"): "subject",
-    ("snippet", "contains"): "",
-    ("any", "contains"): "",
-    ("any", "words"): "",
 }
+# Not here on purpose: `snippet` and `any`. A bare Gmail term searches the whole body,
+# attachments' names and more, so it matches mail the Python rule would not (L4).
+
+
+def label_token(name: str) -> str:
+    """The Gmail search token for a label: system labels by their operator, user labels
+    the way Gmail spells them in a query (lower case, spaces and `/` as `-`). An
+    unquoted `label:Action Required` would search for `label:action` AND the word `required`."""
+    system = SYSTEM_LABELS.get(name.upper())
+    if system:
+        return system
+    return "label:" + re.sub(r"[\s/]+", "-", name.strip()).lower()
+
+
+def _group_query(conds: Sequence[Condition]) -> str | None:
+    parts: list[str] = []
+    for cond in conds:
+        if cond.field == "age_days" and cond.op == "gt" and isinstance(cond.value, (int, float)):
+            parts.append(f"older_than:{int(cond.value)}d")
+            continue
+        if cond.field == "label" and cond.op in ("equals", "contains"):
+            name = str(cond.value or "")
+            if not name:
+                return None
+            parts.append(label_token(name))
+            continue
+        key = _SAFE.get((cond.field, cond.op))
+        if key is None or not cond.value:
+            return None
+        token = str(cond.value)
+        if re.search(r'[\s"(){}]', token):
+            token = '"' + token.replace('"', "") + '"'
+        parts.append(f"{key}:{token}")
+    return " ".join(parts) or None
 
 
 def to_query(rule: Rule) -> str | None:
@@ -172,29 +203,37 @@ def to_query(rule: Rule) -> str | None:
     None means: run the rule in Python over listed messages instead. That is the
     safe direction — a wrong query acts on the wrong mail.
     """
-    if rule.any_of:
-        return None
     parts: list[str] = []
-    for cond in rule.match:
-        if cond.field == "age_days" and cond.op == "gt" and isinstance(cond.value, (int, float)):
-            parts.append(f"older_than:{int(cond.value)}d")
-            continue
-        if cond.field == "label" and cond.op in ("equals", "contains"):
-            name = str(cond.value or "")
-            if not name:
-                return None
-            parts.append(SYSTEM_LABELS.get(name.upper(), f"label:{name}"))
-            continue
-        key = _SAFE.get((cond.field, cond.op))
-        if key is None or not cond.value:
+    if rule.match:
+        base = _group_query(rule.match)
+        if base is None:
             return None
-        token = str(cond.value)
-        if re.search(r'[\s"()]', token):
-            token = f'"{token}"'
-        parts.append(f"{key}:{token}" if key else token)
-    if not parts:
+        parts.append(base)
+    if rule.any_of:
+        groups = [_group_query(g) for g in rule.any_of]
+        if not groups or any(g is None for g in groups):
+            return None
+        parts.append("{" + " ".join(f"({g})" for g in groups) + "}")
+    return " ".join(parts) or None
+
+
+_FREEMAIL = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "icloud.com",
+             "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com"}
+_FREEMAIL_FAMILIES = ("yahoo.", "gmx.", "yandex.")
+
+
+def sender_key(addr: str | None) -> str | None:
+    """What a sender rule should match: the domain — except on freemail, where the domain
+    is millions of unrelated people and only the full address names one sender (L3)."""
+    addr = (addr or "").strip().lower()
+    if "@" not in addr:
         return None
-    return " ".join(parts)
+    domain = addr.rsplit("@", 1)[1]
+    if not domain:
+        return None
+    if domain in _FREEMAIL or domain.startswith(_FREEMAIL_FAMILIES):
+        return addr
+    return domain
 
 
 def action_query(action: Action, label: str | None) -> str | None:

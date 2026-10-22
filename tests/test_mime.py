@@ -74,3 +74,14 @@ def test_tidy_keeps_paragraphs_but_not_rivers_of_blank_lines():
 def test_an_empty_payload_is_empty_not_an_error():
     assert payload_text({}) == ""
     assert payload_text({"mimeType": "text/plain"}) == ""
+
+
+def test_an_attached_or_forwarded_text_is_not_the_body():
+    """S2: an unnamed `Content-Disposition: attachment` part, or a forwarded message, is
+    not what the sender wrote."""
+    attached = {**part("text/plain", "attached contract text"),
+                "headers": [{"name": "Content-Disposition", "value": "attachment"}]}
+    forwarded = {"mimeType": "message/rfc822", "filename": "",
+                 "parts": [part("text/plain", "forwarded words")]}
+    payload = {"mimeType": "multipart/mixed", "parts": [attached, forwarded, part("text/plain", "my own words")]}
+    assert payload_text(payload) == "my own words"

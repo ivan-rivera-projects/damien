@@ -11,7 +11,8 @@ the whole design.
 | **rules** (`~/.damien/rules.json`) | you, `rules from-senders`, `rules from-group` | the model | free |
 | **buckets** (`DEFAULT_SPEC` in `src/damien/decide.py`) | the code | nothing | ≈$0.000046 a message |
 
-A correction is recorded on the message, so the next plan agrees with you without a rule.
+A correction is recorded on the message, so the next plan — `plan build` or `rules plan` —
+agrees with you without a rule.
 A rule is *deterministic*: the same message always lands the same way, with no model call
 and no charge. The buckets are the model's choices, and they are the only layer that can
 be wrong in a way nobody wrote down — which is why they are last and why every verdict is
@@ -69,8 +70,8 @@ A rule is a list of conditions (AND), optional OR-groups, and an action:
 
 **What Gmail can evaluate itself**: a rule is translated to a Gmail query when its
 conditions are translatable (`from:`, `subject:`, `label:`, `older_than:` …), which is
-what makes `rules plan` free and fast. A rule using a regex or a snippet match cannot be
-translated and is evaluated in Python over fetched headers — correct, but it costs a
+what makes `rules plan` free and fast. A rule using a regex, or matching the `snippet` or
+`any` field, cannot be translated and is evaluated in Python over fetched headers — correct, but it costs a
 fetch, so `rules list` marks which is which.
 
 ## The policy record — the rules that encode a decision
@@ -103,8 +104,11 @@ file reviewable. The decisions that shaped the mailbox:
 ## Changing policy
 
 - **One message**: `damien correct <id> --action archive --note "…"` or `damien restore <id>`.
-- **A class you just reviewed**: `damien rules from-group <plan_id> -g <n> --yes` (try `--dry-run`).
-- **Every consistent sender in a plan**: `damien rules from-senders <plan_id> --yes`.
+- **A class you just reviewed**: `damien rules from-group <plan_id> -g <N:fp> --yes` (the
+  group as `plan digest` printed it; refused if the group changed; try `--dry-run`).
+- **Every consistent sender in a plan**: `damien rules from-senders <plan_id> --yes` (a
+  sender is the domain, or the full address for freemail; refused where you corrected that
+  sender's mail to something else).
 - **By hand**: edit `~/.damien/rules.json`; `damien rules list` shows what each rule can do.
 - **The buckets**: edit `DEFAULT_SPEC` in `src/damien/decide.py`. This invalidates the
   verdict cache — **every message is re-judged**, which on this mailbox costs about

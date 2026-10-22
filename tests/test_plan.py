@@ -129,7 +129,7 @@ def test_a_partial_run_stays_resumable_and_replays_nothing(store: Store, gmail, 
     assert store.get_plan(plan.id).status == "approved"           # not "applied" — nothing was finished
     run = store.last_run_for_plan(plan.id)
     assert run.status == "partial" and run.error
-    journaled = len(run.batches)
+    journaled = sum(b.state == "done" for b in run.batches)       # the failed batch stays pending
     sent_before = len(fake.mods)
 
     fake.fail_mods = 0                                            # heal, resume
@@ -211,7 +211,7 @@ def test_build_plan_reports_what_came_from_cache(store: Store, gmail, fake):
     stats: dict[str, int] = {}
     plan = build_plan(store=store, gmail=gmail, rules=[], judge=FakeJudge(), query="in:inbox",
                       limit=None, stats=stats)
-    assert stats == {"messages": 3, "fetched": 0, "cached": 3, "read_bodies": "off"}
+    assert stats == {"messages": 3, "fetched": 0, "cached": 3, "read_bodies": "off", "judge_failed": 0}
     assert len(plan.items) == 3
 
 
@@ -373,10 +373,11 @@ def test_a_rule_query_is_scoped_to_the_inbox(store: Store, gmail, fake):
     rules = [Rule(id="r-old", name="old", action=Action.archive,
                   match=[Condition(field="age_days", op="gt", value=365)])]
     plan_from_rules(store=store, gmail=gmail, rules=rules, sample=0)
-    assert fake.queries[-1] == "in:inbox older_than:365d -in:spam -in:trash"
+    assert fake.queries[0] == "in:inbox older_than:365d -in:spam -in:trash"
+    fake.queries.clear()
 
     plan_from_rules(store=store, gmail=gmail, rules=rules, sample=0, scope="")
-    assert fake.queries[-1] == "older_than:365d -in:spam -in:trash"
+    assert fake.queries[0] == "older_than:365d -in:spam -in:trash"
 
 
 def test_plan_from_rules_lists_and_does_not_fetch_everything(store: Store, gmail, fake):
@@ -522,7 +523,7 @@ def test_filing_marks_read_when_asked_and_undo_puts_unread_back(store: Store, gm
 
     run = apply_plan(store=store, gmail=gmail, plan_id=plan.id, token=token, mark_read_when_filed=True)
     assert sorted(fake.mods[-1]["removeLabelIds"]) == ["INBOX", "UNREAD"]
-    assert "UNREAD" in run.batches[0].inverse["add"]          # the journal can put it back
+    assert "UNREAD" in run.batches[0].inverse["ops"][0]["add"]   # the journal can put it back
 
     undo_run(store=store, gmail=gmail, run_id=run.id)
     assert "UNREAD" in fake.mods[-1]["addLabelIds"]            # unread, restored
@@ -568,3 +569,12 @@ def test_a_label_that_keeps_it_in_the_inbox_does_not_mark_it_read(store: Store, 
     body = fake.mods[-1]
     assert body["addLabelIds"] == ["CATEGORY_PROMOTIONS"]
     assert body["removeLabelIds"] == []                        # neither INBOX nor UNREAD
+
+
+def test_a_refetch_keeps_the_stored_body(store: Store, gmail, fake):
+    """L11: past the header TTL the labels are refreshed; the body read earlier is kept."""
+    fake.add("m1")
+    [m] = gmail.fetch(["m1"])
+    store.upsert_messages([m.model_copy(update={"body": "the newest words"})])
+    [again], fetched = load_messages(store=store, gmail=gmail, ids=["m1"], ttl_hours=0)
+    assert fetched == 1 and again.body == "the newest words"

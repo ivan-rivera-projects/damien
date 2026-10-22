@@ -13,9 +13,11 @@ messages be put in order by software you would actually leave alone with your ma
 ## Why it is different
 
 - **It never acts on mail you have not read.** A plan is a document. Applying one takes an
-  approval token, and `--only <action>` applies exactly the slice you looked at.
-- **Every write is reversible.** Each batch is journalled with its inverse *before* it
-  reaches Gmail, so `run undo` puts back precisely what it moved. `trash` is a label and
+  approval token — printed once by `plan approve`, stored only as a hash — and
+  `--only <action>` applies exactly the slice you looked at.
+- **Every write is reversible.** Each batch is journalled as `pending` *before* it reaches
+  Gmail and marked `done` after, so `run undo` puts back the state each message had when the
+  plan was built (inbox, unread, label). `trash` is a label and
   Gmail holds it 30 days; there is no permanent-delete path in the code or the scope.
 - **Rules run first, and they are free.** A rule that maps onto Gmail search syntax is
   executed *by Gmail* — no listings, no headers, no model. On a settled mailbox a pass
@@ -26,7 +28,8 @@ messages be put in order by software you would actually leave alone with your ma
   could not settle, and never an attachment.
 - **Your keys, your credential, nothing in the middle.** No server, no account here, no
   telemetry. Run it with no model at all if you like (`DAMIEN_JUDGE=rules`).
-- **It does not send.** There is no send path and no send scope.
+- **It does not send.** There is no send *path*: no code in Damien sends, drafts-and-sends,
+  or forwards (the `gmail.modify` scope technically permits sending; Damien never calls it).
 
 ## What it did on a real mailbox
 
@@ -72,7 +75,7 @@ token: 1f0c…
 $ damien plan apply 8f6ed799980e --token 1f0c… --yes --only trash
 run 2ba1162fdb34 ok: 114 message(s) in 1 batch(es) (trash slice)
 the rest of the plan is still approved
-to take it back: damien run undo 2ba1162fdb34
+to take it back: damien run undo 2ba1162fdb34 --yes
 ```
 
 Nothing in Gmail changed until that last command, and `run undo 2ba1162fdb34` reverses it.
@@ -100,11 +103,13 @@ Two things are yours, and neither is shared with anyone else:
 1. **A Gmail credential of your own** — a Google OAuth *desktop* client from your own
    Cloud project, dropped at `~/.damien/credentials.json`, then `damien login`. One scope
    (`gmail.modify`), and you can revoke it whenever you like.
-2. **A judge key, or none** — `openrouter` for the model this is developed against, or
-   `DAMIEN_JUDGE=rules` to use no model at all and pay nothing.
+2. **A judge, or none** — any decision model with the Jev contract: `openrouter`
+   (`DAMIEN_MODEL` + `OPENROUTER_API_KEY`), `typesafe` (`TYPESAFE_API_KEY`), `local`
+   (`DAMIEN_JUDGE_URL`; nothing leaves the machine), or `DAMIEN_JUDGE=rules` to use no model
+   at all and pay nothing. `damien judge eval` then calibrates the threshold for your model.
 
 Then `damien init` writes your profile and a rules file, and `damien doctor` tells you
-whether anything is missing.
+whether anything is missing (it changes nothing).
 
 → **[`docs/SETUP.md`](docs/SETUP.md)** has the click-by-click, including the OAuth
 testing-mode trap that expires tokens weekly (it caught this project's own first
@@ -139,7 +144,7 @@ scan ──► rules ──► (residue) ──► the judge ──► guardrail
 6. **A confidence gate.** Below `DAMIEN_CONFIDENCE_ASK` a judgement keeps the message with
    the reason attached: recorded, but not acted on.
 7. **Plans are read, then applied** — by group or by action, with every batch journalled
-   before it lands, so a run is resumable and undoable.
+   `pending` before it lands and `done` after, so a run is resumable and undoable.
 
 ## Use
 
@@ -147,18 +152,23 @@ scan ──► rules ──► (residue) ──► the judge ──► guardrail
 damien doctor                                        # is everything wired up?
 damien scan  -q 'in:inbox older_than:2y'             # how much is there? reads only
 damien plan build -q 'in:inbox' -n 200               # decide; writes nothing to Gmail
-damien plan digest <plan-id> --min-size 5            # collapse it into review groups
-damien plan approve <plan-id>                        # prints a token, once
+damien plan digest <plan-id> --min-size 5            # collapse it into review groups (N:fp)
+damien plan approve <plan-id>                        # prints a token, once; only its hash is kept
 damien plan apply <plan-id> --token <t> --only archive --yes
-damien run undo <run-id>                             # take a run back
+damien run undo <run-id> --yes                       # take a run back
 damien correct <message-id> --action keep --note 'a brand we follow'
 damien rules from-senders <plan-id> --yes            # make your decisions permanent
 damien rules plan --scope 'in:inbox older_than:2y'   # a rule pass over history, bounded
+damien judge eval                                    # calibrate the model's threshold
+damien pass weekly                                   # the scheduled pass: build, approve, apply the certain
+damien skill install --target openclaw              # give an agent host the Damien skill
 ```
 
-`--json` on `status`, `doctor`, `scan`, `plan build|digest|show`, `run list`, `rules list`.
+`--json` on `status`, `doctor`, `scan`, `plan build|digest|show|approve|apply|apply-group`,
+`run list|undo`, `rules list`, `correct`, `restore`, `judge eval`, `pass`.
 Safe to run twice: `plan build` never writes to Gmail, an applied plan refuses to re-apply,
-and a partial run resumes only the batches its journal does not hold.
+a partial run resumes only when its filter matches and only the batches its journal does not
+hold, and an undone run cannot be undone twice.
 
 ## Documentation
 
@@ -211,7 +221,7 @@ and was reaching Sent and archived mail too.
 |---|---|---|
 | setup | none — one file | one env line |
 | vectors | text column, clustered in Python | `message_embeddings` + `pgvector` |
-| tested | ✅ | ✅ the same suite runs against both dialects |
+| tested | ✅ | ✅ in CI: Linux runners start a `postgres:17` service; macOS runs SQLite only |
 
 Tables: `messages`, `decisions`, `verdicts` (the judgement cache), `message_embeddings`,
 `plans`, `plan_items`, `runs`, `run_batches`, `corrections`. A column added after release is
@@ -238,9 +248,11 @@ blob. Result: 200 messages → 36 review groups.
   `DAMIEN_READ_BODIES=on_escalation` it also reads the *newest text* of the messages the
   snippet could not settle — quoted replies stripped, capped, attachments never opened — and
   keeps what it read on your machine so a re-plan costs nothing. Off by default.
-- **No scheduler.** Run it, or schedule it (see the RUNBOOK); the tool exits either way.
+- **No scheduler.** Have the host's own scheduler run `damien pass weekly` every Monday and
+  `damien pass monthly` on the 1st (see the RUNBOOK); the tool exits either way.
 - **No permanent delete.** `trash` is recoverable for 30 days, and the code cannot do more.
-- **No sending.** No send path, no send scope.
+- **No sending.** No send path: nothing sends, drafts-and-sends or forwards (the scope
+  technically permits sending; Damien never calls it).
 - **No telemetry.** Nothing is reported anywhere.
 - **No MCP door.** A small tool wrapper over these functions is the obvious next step for a
   host that cannot shell out; the CLI costs zero tool schemas in a context.
@@ -284,8 +296,8 @@ call again.
 
 ## Status
 
-Beta, and in daily use on a 100,000-message mailbox. The test suite runs on Linux and macOS
-against both store dialects. Interfaces may still move; the safety properties above will
+Beta, and in daily use on a 100,000-message mailbox. The test suite runs on Linux and macOS;
+Postgres is exercised on the Linux runners. Interfaces may still move; the safety properties above will
 not.
 
 MIT licensed. The predecessor project — a four-service platform that this replaced — was

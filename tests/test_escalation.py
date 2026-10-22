@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from damien.decide import DEFAULT_SPEC, Verdict
 from damien.jev import JevJudge
+from damien.models import Action
 from damien.plan import build_plan
 from damien.store import Store
 
@@ -94,3 +95,47 @@ def test_the_plan_records_which_mode_it_read_bodies_in(store: Store, gmail, fake
     assert off["read_bodies"] == "off"
     _, on = a_plan(store, gmail, fake, judge, read_bodies="on_escalation")
     assert on["read_bodies"] == "on_escalation"
+
+
+def test_a_stored_body_never_reaches_the_judge_when_reading_is_off(store: Store, gmail, fake):
+    """C3: a body read by an earlier escalation sat in the store and rode along to every
+    later judgment — even with reading turned off."""
+    a_plan(store, gmail, fake, BodyAwareJudge(), read_bodies="on_escalation")
+    assert store.get_messages(["m1"])[0].body                      # a body is stored now
+    judge = BodyAwareJudge()
+    a_plan(store, gmail, fake, judge, read_bodies="off")
+    assert judge.seen and all(not body for _, body in judge.seen)
+
+
+def test_a_body_is_not_fetched_again_after_the_header_ttl(store: Store, gmail, fake):
+    """L11: refetching headers for fresh labels used to drop the stored body, so every
+    escalated message was read again on the next pass."""
+    a_plan(store, gmail, fake, BodyAwareJudge(), read_bodies="on_escalation")
+    assert gmail.bodies == 2
+    build_plan(store=store, gmail=gmail, rules=[], judge=BodyAwareJudge(), query="in:inbox",
+               spec=DEFAULT_SPEC, read_bodies="on_escalation", ttl_hours=0)
+    assert gmail.bodies == 2
+    assert "invoice" in (store.get_messages(["m1"])[0].body or "")
+
+
+class FailingJudge(BodyAwareJudge):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = {"failed"}
+
+
+def test_escalation_skips_protected_corrected_and_failed_mail(store: Store, gmail, fake):
+    """L10: reading the words of mail whose answer is already settled sends text off the
+    machine for nothing."""
+    fake.labels["Label_9"] = "Bills"
+    for mid in ("plain", "protected", "corrected", "failed"):
+        fake.add(mid, subject="quick question", sender="a@client.example", body="see the invoice",
+                 labels=["INBOX", "UNREAD", "Label_9"] if mid == "protected" else None)
+    store.correct("corrected", Action.keep)
+    judge = FailingJudge()
+    stats: dict = {}
+    build_plan(store=store, gmail=gmail, rules=[], judge=judge, query="in:inbox", spec=DEFAULT_SPEC,
+               stats=stats, read_bodies="on_escalation")
+    assert {mid for mid, body in judge.seen if body} == {"plain"}
+    assert gmail.bodies == 1
+    assert stats["judge_failed"] == 1

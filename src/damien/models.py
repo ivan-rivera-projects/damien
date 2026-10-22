@@ -90,6 +90,7 @@ class Decision(BaseModel):
     rationale: str | None = None
     confidence: float | None = None
     probabilities: dict[str, float] | None = None
+    signals: dict[str, float | None] | None = None   # the judge's raw answers, e.g. wants_a_reply
     model: str | None = None
     keep_in_inbox: bool = False
     at: datetime = Field(default_factory=now)
@@ -110,6 +111,11 @@ class PlanItem(BaseModel):
     source: Source = Source.default
     rule_id: str | None = None
     confidence: float | None = None
+    # The message's state when the plan was built, so undo can put back exactly what was
+    # there. None = unknown (an older plan) → undo uses the fixed inverse.
+    was_in_inbox: bool | None = None
+    was_unread: bool | None = None
+    had_label: bool | None = None
 
 
 class Plan(BaseModel):
@@ -138,6 +144,7 @@ class RunBatch(BaseModel):
     label: str | None = None
     inverse: dict[str, object] | None = None   # what an undo needs
     at: datetime = Field(default_factory=now)
+    state: str = "done"        # 'pending' = journaled, Gmail call not known to have landed
 
 
 class Run(BaseModel):

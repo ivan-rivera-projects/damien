@@ -104,11 +104,20 @@ def _first_part(payload: dict[str, Any], wanted: str) -> str | None:
         if part.get("filename"):
             continue                                   # an attachment: never read
         mime = (part.get("mimeType") or "").lower()
+        if mime == "message/rfc822" or _is_attachment(part):
+            continue                                   # a forwarded mail or an unnamed attachment: not their words
         data = (part.get("body") or {}).get("data")
         if mime == wanted and data:
             return _decode(data)
         stack.extend(part.get("parts") or [])
     return None
+
+
+def _is_attachment(part: dict[str, Any]) -> bool:
+    for header in part.get("headers") or []:
+        if (header.get("name") or "").lower() == "content-disposition":
+            return (header.get("value") or "").strip().lower().startswith("attachment")
+    return False
 
 
 def _decode(data: str) -> str:

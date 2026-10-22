@@ -11,6 +11,8 @@ once with `?` placeholders and translated for Postgres.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import sqlite3
 import uuid
@@ -351,7 +353,13 @@ class Store:
     # column to an existing table, and this tool must survive its own schema changes.
     ADDED_COLUMNS: ClassVar[dict[str, dict[str, str]]] = {
         "messages": {"list_id": "TEXT", "body_excerpt": "TEXT"},
-        "plan_items": {"keep_in_inbox": "INTEGER NOT NULL DEFAULT 0"},
+        "decisions": {"signals": "TEXT"},
+        "plan_items": {
+            "keep_in_inbox": "INTEGER NOT NULL DEFAULT 0",
+            "was_in_inbox": "INTEGER", "was_unread": "INTEGER", "had_label": "INTEGER",
+        },
+        "runs": {"filter": "TEXT"},
+        "run_batches": {"state": "TEXT NOT NULL DEFAULT 'done'"},
         "plans": {
             "judge_usd": "DOUBLE PRECISION NOT NULL DEFAULT 0",
             "judge_calls": "INTEGER NOT NULL DEFAULT 0",
@@ -371,7 +379,8 @@ class Store:
     def _columns(self, table: str) -> set[str]:
         if self.dialect == "postgres":
             rows = self.conn.execute(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = ?", (table,))
+                "SELECT column_name FROM information_schema.columns"
+                " WHERE table_schema = current_schema() AND table_name = ?", (table,))
             return {r["column_name"] for r in rows}
         return {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}
 
@@ -457,13 +466,14 @@ class Store:
     def add_decisions(self, decisions: Iterable[Decision], account: str = "") -> int:
         rows = [
             (d.message_id, account, d.source.value, d.action.value, d.label, d.rule_id, d.rationale,
-             d.confidence, json.dumps(d.probabilities) if d.probabilities else None, d.model, _iso(d.at))
+             d.confidence, json.dumps(d.probabilities) if d.probabilities else None, d.model, _iso(d.at),
+             json.dumps(d.signals) if d.signals else None)
             for d in decisions
         ]
         self.conn.executemany(
             """INSERT INTO decisions (message_id, account, source, action, label, rule_id, rationale,
-                                      confidence, probabilities, model, at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                                      confidence, probabilities, model, at, signals)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             rows,
         )
         self.conn.commit()
@@ -479,8 +489,19 @@ class Store:
                     source=Source(row["source"]), rule_id=row["rule_id"], rationale=row["rationale"],
                     confidence=row["confidence"],
                     probabilities=json.loads(row["probabilities"]) if row["probabilities"] else None,
+                    signals=json.loads(row["signals"]) if row["signals"] else None,
                     model=row["model"], at=datetime.fromisoformat(row["at"]),
                 ))
+        return out
+
+    def decision_signals(self, message_ids: Sequence[str]) -> dict[str, dict]:
+        """The most recent non-null judge signals per message (e.g. `wants_a_reply`)."""
+        out: dict[str, dict] = {}
+        for chunk in _chunks(list(message_ids), 900):
+            q = (f"SELECT message_id, signals FROM decisions WHERE signals IS NOT NULL"
+                 f" AND message_id IN ({','.join('?' * len(chunk))}) ORDER BY id")
+            for row in self.conn.execute(q, chunk):
+                out[row["message_id"]] = json.loads(row["signals"])      # later rows win
         return out
 
     def decision_count(self) -> int:
@@ -497,12 +518,7 @@ class Store:
             (plan.id, account, query, plan.status, plan.token, _iso(plan.created_at), model, judge,
              float(judge_usd), int(judge_calls), int(judge_cached)),
         )
-        self.conn.executemany(
-            """INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence, keep_in_inbox)
-               VALUES (?,?,?,?,?,?,?,?)""",
-            [(plan.id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence,
-              int(i.keep_in_inbox)) for i in plan.items],
-        )
+        self._insert_items(plan.id, plan.items)
         self.conn.commit()
         return plan
 
@@ -513,7 +529,8 @@ class Store:
         items = [
             PlanItem(message_id=r["message_id"], action=Action(r["action"]), label=r["label"],
                      source=Source(r["source"]), rule_id=r["rule_id"], confidence=r["confidence"],
-                     keep_in_inbox=bool(r["keep_in_inbox"]))
+                     keep_in_inbox=bool(r["keep_in_inbox"]), was_in_inbox=_tri(r["was_in_inbox"]),
+                     was_unread=_tri(r["was_unread"]), had_label=_tri(r["had_label"]))
             for r in self.conn.execute("SELECT * FROM plan_items WHERE plan_id=? ORDER BY message_id", (plan_id,))
         ]
         return Plan(id=row["id"], account=row["account"], query=row["query"], status=row["status"],
@@ -524,11 +541,23 @@ class Store:
     def list_plans(self, limit: int = 20) -> list[Any]:
         return list(self.conn.execute("SELECT * FROM plans ORDER BY created_at DESC LIMIT ?", (limit,)))
 
-    def approve_plan(self, plan_id: str) -> str:
+    def approve_plan(self, plan_id: str, status: str = "approved") -> str:
+        """Store only a hash of the token: whoever can read the database must not be able to
+        apply a plan with it. The plaintext is returned once, here."""
         token = uuid.uuid4().hex[:16]
-        self.conn.execute("UPDATE plans SET status='approved', token=? WHERE id=?", (token, plan_id))
+        self.conn.execute("UPDATE plans SET status=?, token=? WHERE id=?", (status, _hash_token(token), plan_id))
         self.conn.commit()
         return token
+
+    @staticmethod
+    def check_token(plan: Plan, token: str | None) -> bool:
+        """A sha256 match — or, for a plan approved before 0.4.0, the plaintext it stored."""
+        stored = plan.token
+        if not stored or not token:
+            return False
+        if hmac.compare_digest(stored, _hash_token(token)):
+            return True
+        return len(stored) != 64 and hmac.compare_digest(stored, token)
 
     def set_plan_status(self, plan_id: str, status: str) -> None:
         self.conn.execute("UPDATE plans SET status=? WHERE id=?", (status, plan_id))
@@ -536,31 +565,45 @@ class Store:
 
     def update_plan_items(self, plan_id: str, items: Sequence[PlanItem]) -> None:
         self.conn.execute("DELETE FROM plan_items WHERE plan_id=?", (plan_id,))
+        self._insert_items(plan_id, items)
+
+    def _insert_items(self, plan_id: str, items: Sequence[PlanItem]) -> None:
         self.conn.executemany(
-            "INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence, keep_in_inbox)"
-            " VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO plan_items (plan_id, message_id, action, label, source, rule_id, confidence, keep_in_inbox,"
+            " was_in_inbox, was_unread, had_label) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             [(plan_id, i.message_id, i.action.value, i.label, i.source.value, i.rule_id, i.confidence,
-              int(i.keep_in_inbox)) for i in items],
+              int(i.keep_in_inbox), _int(i.was_in_inbox), _int(i.was_unread), _int(i.had_label)) for i in items],
         )
         self.conn.commit()
 
     # ---- runs (the journal) -------------------------------------------
-    def start_run(self, plan: Plan) -> Run:
+    def start_run(self, plan: Plan, filter_sig: str = "") -> Run:
         run = Run(id=uuid.uuid4().hex[:12], plan_id=plan.id, account=plan.account)
         self.conn.execute(
-            "INSERT INTO runs (id, plan_id, account, status, started_at, applied) VALUES (?,?,?,?,?,0)",
-            (run.id, run.plan_id, run.account, run.status, _iso(run.started_at)),
+            "INSERT INTO runs (id, plan_id, account, status, started_at, applied, filter) VALUES (?,?,?,?,?,0,?)",
+            (run.id, run.plan_id, run.account, run.status, _iso(run.started_at), filter_sig),
         )
         self.conn.commit()
         return run
 
     def journal_batch(self, run_id: str, batch: RunBatch) -> None:
+        """Record intent: the row is written `pending` before the Gmail call, so a process
+        that dies between the call and `batch_done` still leaves something undo can replay."""
         self.conn.execute(
-            "INSERT INTO run_batches (run_id, idx, op, label, ids, inverse, at) VALUES (?,?,?,?,?,?,?)",
+            """INSERT INTO run_batches (run_id, idx, op, label, ids, inverse, at, state) VALUES (?,?,?,?,?,?,?,'pending')
+               ON CONFLICT(run_id, idx) DO UPDATE SET op=EXCLUDED.op, label=EXCLUDED.label, ids=EXCLUDED.ids,
+                 inverse=EXCLUDED.inverse, at=EXCLUDED.at, state='pending'""",
             (run_id, batch.index, batch.op, batch.label, json.dumps(batch.ids),
              json.dumps(batch.inverse) if batch.inverse else None, _iso(batch.at)),
         )
-        self.conn.execute("UPDATE runs SET applied = applied + ? WHERE id=?", (len(batch.ids), run_id))
+        self.conn.commit()
+
+    def batch_done(self, run_id: str, index: int) -> None:
+        row = self.conn.execute("SELECT ids, state FROM run_batches WHERE run_id=? AND idx=?", (run_id, index)).fetchone()
+        if row is None or row["state"] == "done":
+            return
+        self.conn.execute("UPDATE run_batches SET state='done' WHERE run_id=? AND idx=?", (run_id, index))
+        self.conn.execute("UPDATE runs SET applied = applied + ? WHERE id=?", (len(json.loads(row["ids"])), run_id))
         self.conn.commit()
 
     def finish_run(self, run_id: str, status: str, error: str | None = None) -> None:
@@ -575,7 +618,7 @@ class Store:
         batches = [
             RunBatch(index=r["idx"], op=r["op"], ids=json.loads(r["ids"]), label=r["label"],
                      inverse=json.loads(r["inverse"]) if r["inverse"] else None,
-                     at=datetime.fromisoformat(r["at"]))
+                     at=datetime.fromisoformat(r["at"]), state=r["state"] or "done")
             for r in self.conn.execute("SELECT * FROM run_batches WHERE run_id=? ORDER BY idx", (run_id,))
         ]
         return Run(id=row["id"], plan_id=row["plan_id"], account=row["account"], status=row["status"],
@@ -583,9 +626,19 @@ class Store:
                    finished_at=datetime.fromisoformat(row["finished_at"]) if row["finished_at"] else None,
                    batches=batches, applied=row["applied"], error=row["error"])
 
-    def last_run_for_plan(self, plan_id: str) -> Run | None:
-        row = self.conn.execute("SELECT id FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT 1", (plan_id,)).fetchone()
+    def last_run_for_plan(self, plan_id: str, filter_sig: str | None = None) -> Run | None:
+        """The newest run of a plan; with `filter_sig`, the newest run of that same selection."""
+        if filter_sig is None:
+            row = self.conn.execute("SELECT id FROM runs WHERE plan_id=? ORDER BY started_at DESC LIMIT 1",
+                                    (plan_id,)).fetchone()
+        else:
+            row = self.conn.execute("SELECT id FROM runs WHERE plan_id=? AND filter=? ORDER BY started_at DESC LIMIT 1",
+                                    (plan_id, filter_sig)).fetchone()
         return self.get_run(row["id"]) if row else None
+
+    def runs_for_plan(self, plan_id: str) -> list[Run]:
+        rows = list(self.conn.execute("SELECT id FROM runs WHERE plan_id=? ORDER BY started_at", (plan_id,)))
+        return [r for r in (self.get_run(row["id"]) for row in rows) if r is not None]
 
     # ---- verdict cache (so an unchanged message is never judged twice) ---
     def get_verdict(self, cache_key: str) -> dict | None:
@@ -674,6 +727,14 @@ class Store:
     def corrections(self, limit: int = 200) -> list[Any]:
         return list(self.conn.execute("SELECT * FROM corrections ORDER BY at DESC LIMIT ?", (limit,)))
 
+    def latest_corrections(self) -> dict[str, dict]:
+        """The newest correction per message, all of them: a person's word must not
+        disappear just because there are more than N of them."""
+        out: dict[str, dict] = {}
+        for row in self.conn.execute("SELECT * FROM corrections ORDER BY at, id"):
+            out[row["message_id"]] = {k: row[k] for k in ("message_id", "action", "label", "note", "at")}
+        return out
+
     # ---- reporting -----------------------------------------------------
     def summary(self) -> dict[str, int]:
         q = self.conn.execute
@@ -713,6 +774,18 @@ def open_store(settings: Any) -> Store:
 def _chunks(items: list, size: int):
     for i in range(0, len(items), size):
         yield items[i:i + size]
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _int(value: bool | None) -> int | None:
+    return None if value is None else int(value)
+
+
+def _tri(value: Any) -> bool | None:
+    return None if value is None else bool(value)
 
 
 def _message(row: Any) -> Message:

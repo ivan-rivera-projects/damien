@@ -13,6 +13,24 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ["3.11", "3.13"]
+    # Service containers run on Linux runners only: ubuntu covers both store dialects,
+    # macOS covers SQLite (the Postgres half skips itself when DAMIEN_TEST_DB_URL is unset).
+    services:
+      postgres:
+        image: ${{ matrix.os == 'ubuntu-latest' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: damien
+          POSTGRES_PASSWORD: damien
+          POSTGRES_DB: damien_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U damien"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DAMIEN_TEST_DB_URL: ${{ matrix.os == 'ubuntu-latest' && 'postgresql://damien:damien@localhost:5432/damien_test' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,7 +45,4 @@ jobs:
           pip install ruff
           ruff check .            # the standard lives in pyproject.toml
       - name: test
-        # The Postgres half of the store matrix skips itself when DAMIEN_TEST_DB_URL is
-        # unset, so the suite runs on SQLite alone here. To cover both dialects in CI,
-        # add a postgres service and set DAMIEN_TEST_DB_URL.
         run: pytest -q

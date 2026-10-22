@@ -1,161 +1,21 @@
-# The prompt that creates the Hermes skill
+# The agent skill
 
-This is the prompt to hand to Hermes. It is written to be *executed*, not read: it tells
-Hermes what to build, what to read first, and what the skill must contain.
+Damien ships an agent skill: a single `SKILL.md` in the AgentSkills format, packaged with the
+code at `src/damien/skill/SKILL.md`. It tells an agent how to triage mail with Damien — which
+commands to run, what needs a person's approval, and what it must never do.
 
-Copy everything in the block below into Hermes.
-
----
-
-Create a skill called **`damien-mail-triage`** that lets me run and schedule the Damien
-Gmail triage tool. Damien is a local CLI on this Mac — it is not part of CONSPIRE and
-must never be wired into it. It talks to Gmail and nothing else.
-
-**Before you write anything, read these four documents. They are the source of truth;
-the skill you create must point at them, not copy them, so the two cannot drift:**
-
-- `/Users/riveraix/Downloads/AWS/damien/docs/HOW-IT-WORKS.md` — the pipeline, the store, what Damien will not do
-- `/Users/riveraix/Downloads/AWS/damien/docs/COMMANDS.md` — every command, when to use it, what it writes, what it costs
-- `/Users/riveraix/Downloads/AWS/damien/docs/POLICY.md` — the three layers of authority, the buckets, the rule vocabulary, and why each rule exists
-- `/Users/riveraix/Downloads/AWS/damien/docs/RUNBOOK.md` — the scheduled passes, the failure modes, how to take anything back
-
-Also confirm the tool is installed and working before you write the skill:
+Install it into an agent host:
 
 ```bash
-cd /Users/riveraix/Downloads/AWS/damien && damien version && damien doctor
+damien skill install --target openclaw   # ~/.openclaw/skills/damien-mail-triage/SKILL.md
+damien skill install --target hermes     # ~/.hermes/skills/damien-mail-triage/SKILL.md
 ```
 
-It must be **at least v0.3.1** and `doctor` must be green. If the version is older, the install
-needs updating before anything else; if `doctor` fails, stop and tell me — do not invent
-commands.
+`--dir PATH` installs into another skills folder (for example a workspace `skills/`) as
+`PATH/damien-mail-triage/SKILL.md`; `--force` overwrites an existing copy.
 
-## What the skill must contain
+Have the host's own scheduler run `damien pass weekly` every Monday and `damien pass monthly` on the 1st.
 
-1. **When it triggers** — "clean up my inbox", "what came in last week", "run Damien",
-   or the scheduled passes (below).
-
-2. **The five-line pipeline, as the only safe shape:**
-   `rules plan` (free) → `plan show` (read it) → `plan approve` (token) →
-   `plan apply --token … --yes` → `run undo <run_id>` if it was wrong.
-   Only `apply` writes, and only after `approve`.
-
-3. **The commands, with when to use each** — take the table from `COMMANDS.md` rather than
-   restating it, but the skill must make these distinctions explicit:
-   - `damien rules plan` is **free** and covers everything a rule matches; use it first, always.
-   - `damien plan build` costs **≈$0.000046 a message**; use it only for mail no rule covers.
-   - `damien rules from-senders <plan_id> --yes` after applying a plan — it turns consistent
-     senders into permanent rules, which is what makes later passes free.
-   - `damien restore <id>` for one message, `damien run undo <run_id>` for a whole run.
-
-4. **The pass is one script — call it, do not re-derive it:**
-   ```bash
-   cd ~/Downloads/AWS/damien
-   ./scripts/damien-pass.sh weekly     # Monday: the week just gone
-   ./scripts/damien-pass.sh monthly    # the 1st: the month just gone
-   ```
-   It builds the plan, applies only what is deterministic (rules, my corrections, the model
-   at ≥0.9), and prints the report described in item 7. `--dry-run` builds and reports
-   without applying anything; `--limit N` caps one pass.
-
-5. **The schedule** — every Monday for the prior week, and on the 1st for the prior month.
-   The script's windows are `in:inbox newer_than:7d` and
-   `in:inbox after:<1st of last month> before:<1st of this month>`; the monthly window
-   overlaps the weeklies on purpose (already-decided mail is cached and free).
-
-6. **The unattended rule: apply what is deterministic, report the rest.** On a scheduled
-   run: apply the rules pass, and apply the model pass only at `--min-confidence 0.9`.
-   Everything below that is a **report**, with the plan id and the exact apply command —
-   never applied by the schedule.
-
-7. **The report format** — one message per run: the window; counts by action; what was
-   applied; the plan id; the cost of any model calls; **the bodies line, always** — the pass
-   prints `bodies: N read, for the messages the snippet could not settle`, or
-   `bodies: 0 read — nothing needed it`, or `bodies: not read (DAMIEN_READ_BODIES=off)`;
-   and the command to apply what was left. Report those lines verbatim: the bodies line is
-   the only place that says whether message text left the machine.
-
-   **And end your report with the closing step the pass prints** — `close it  damien rules
-   from-senders <plan_id> --yes` — saying what it does: it turns each sender the pass decided
-   consistently into a rule, so that mail is never judged again and later passes cost less.
-   Run it once I have reviewed and applied the pass, never before, and never on a plan I have
-   not seen. If a pass failed part-way, say so and give `damien run undo <run_id>`.
-
-8. **The never-do list** (verbatim, these are the guardrails):
-   - never `--yes` an unreviewed model slice — rules and `--min-confidence 0.9` are the allowance;
-   - never edit the buckets in `src/damien/decide.py` — that invalidates the verdict cache and re-judges everything (≈$0.17);
-   - never widen a `--scope` past `in:inbox` — a scope without it reaches Sent and Archive;
-   - never attempt to send mail — no code path sends, but the token's scope could, so never widen the scope and never hand the token to another tool;
-   - never involve CONSPIRE, its MCP tools, its ledger or its gateway — this is my personal inbox and nothing about it belongs in a workspace.
-
-9. **The failure modes** — take the table from `RUNBOOK.md` (refused `--yes`, a plan already
-   applied, a `GmailError`, a pass that stopped part-way, cost far above expectation) into
-   the skill, since these are what you will hit.
-
-10. **Two settings change what a pass does. They are mine, not yours** — they live in
-    `~/.damien/.env`, and the skill must never set or change them, only explain them when a
-    report mentions them:
-    - `DAMIEN_MARK_READ_WHEN_FILED=1` — filing a message also marks it read, so what stays
-      unread is exactly what I have not dealt with yet. The pass ends its line with
-      `· filing marks read`.
-    - `DAMIEN_READ_BODIES=on_escalation` — where the snippet was not enough, the tool reads the
-      message's *newest text* and asks the judge again. **This is the only mode where message
-      text reaches a third party**, the pass always says how many bodies it read, and what it
-      read is kept on my machine. Report that count as-is; do not describe it as a failure.
-
-## Before you schedule anything, prove the pass works
-
-```bash
-cd /Users/riveraix/Downloads/AWS/damien
-./scripts/damien-pass.sh weekly --dry-run
-```
-
-It must print a window, a plan id, counts by action and a cost line, and write nothing to
-Gmail. Report that output to me **before** creating either schedule. If it fails, stop and
-show me the error — do not work around it.
-
-## Do not modify the tool
-
-The repo at `/Users/riveraix/Downloads/AWS/damien` is a git checkout on `main`. Its rules
-(68 of them) and its policy are the product of many deliberate decisions, recorded in
-`docs/POLICY.md`. **Read them; never edit the rules, the buckets or the code unless I ask
-in that session.** If you think a rule is wrong, tell me and give me the command —
-`damien correct`, `damien restore`, `damien rules from-senders` — rather than applying it.
-
-## Then schedule it
-
-Once the dry run has passed and you have reported it, set up the two schedules:
-
-- **every Monday**, `./scripts/damien-pass.sh weekly`;
-- **on the 1st of each month**, `./scripts/damien-pass.sh monthly`.
-
-Run it from `/Users/riveraix/Downloads/AWS/damien` (the script resolves the CLI and the
-store itself). Use your own scheduler. Then report the result to me in the format above —
-and when something needs a decision, give me the plan id and the command rather than
-deciding it yourself. If a scheduled run fails, tell me the exit reason and do not retry it
-more than once.
-
-## Updating a skill that already exists
-
-If the skill was built from an earlier copy of this file, hand your agent this:
-
-> Damien has shipped **v0.2.0 → v0.3.1** since you built this skill. Update it, in this order:
->
-> 1. `damien version` must be **≥ 0.3.1** and `damien doctor` green. If not, update the install
->    first (`uv tool install --editable '.[pg,vectors]' --force` from the checkout, or
->    `pipx upgrade damien`).
-> 2. The scheduled pass now prints `bodies: N read, for the messages the snippet could not
->    settle`, and `damien plan build --json` carries a `stats` object (`messages`, `fetched`,
->    `cached`, `escalated`). Add both to the report format.
-> 3. Two settings of mine change what a pass does — never change them yourself, but explain
->    them when a report shows them: `DAMIEN_MARK_READ_WHEN_FILED=1` (filing also marks read;
->    the report ends with `· filing marks read`) and `DAMIEN_READ_BODIES=on_escalation` (it
->    reads the newest text of mail the snippet could not settle, and reports the count — this is
->    the only mode where text reaches a third party).
-> 4. The commands, the pass script and the schedules are **unchanged** — do not recreate them.
-> 5. Finish by running `./scripts/damien-pass.sh weekly --dry-run` and reporting it, so we both
->    know the update took.
-
-For reference, what changed in the tool itself: **v0.2.0** made filing mark read;
-**v0.3.0** added escalation (reading the newest text where the snippet was not enough) and made
-`PRIVACY.md` state exactly what is sent; **v0.3.1** put the body count in the report and the
-stats in `--json`.
+The skill tells the agent to run `damien doctor` first (it changes nothing) and to prefer
+`--json` output wherever a command offers it. Read the packaged file for the full instructions;
+it is the source of truth, not this page.

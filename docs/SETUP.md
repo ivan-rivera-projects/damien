@@ -6,7 +6,7 @@ own and, if you want judgement beyond your rules, a model key of your own. Ten m
 
 Nothing is written to your mail until you approve a plan, so you can work through all of this
 without risking a single message. If anything is missing, `damien doctor` names it and tells
-you the fix.
+you the fix — and changes nothing itself.
 
 ## What it costs to run
 
@@ -65,8 +65,8 @@ Drive or Tasks. You own the client, so you can revoke it in one place whenever y
    ```bash
    damien login
    ```
-   The token lands in `~/.damien/token.json` (0600). Only the hash of it never exists; the
-   token itself never leaves your machine except to Google.
+   The token lands in `~/.damien/token.json` (0600). It never leaves your machine except to
+   Google.
 
 ### The one thing that will bite you: test mode expires tokens
 
@@ -85,12 +85,21 @@ own credential after a week.
 
 Rules run first and cost nothing. The judge only sees what your rules could not settle.
 
+The judge is any System-One decision model with the Jev contract: it takes a state and typed
+questions and returns a choice, a confidence and probabilities. A backend that returns no
+confidence is rejected — it is not a decision model.
+
 | `DAMIEN_JUDGE` | what it does | what you need |
 |---|---|---|
 | `rules` | **deterministic only** — no model, no network, no key | nothing |
-| `openrouter` | Jev through OpenRouter (what this repo is developed and measured against) | `OPENROUTER_API_KEY` |
+| `openrouter` | Jev through OpenRouter (what this repo is developed and measured against) | `DAMIEN_MODEL`, `OPENROUTER_API_KEY` |
 | `typesafe` | Jev direct from TypeSafe | `TYPESAFE_API_KEY` |
-| `fake` | a deterministic stand-in: same shape, no network, for a demo | nothing |
+| `local` | a decision model you run yourself — **nothing leaves this machine** | `DAMIEN_JUDGE_URL` (optional `DAMIEN_JUDGE_KEY`) |
+| `fake` | a deterministic stand-in: same shape, no network, for tests and demos | nothing |
+
+`DAMIEN_JUDGE_URL` overrides any backend's default URL. `DAMIEN_JUDGE_CONCURRENCY` sets how
+many judgments run at once (default 8). A failed judgment is never cached and stays for a
+person.
 
 - **Nothing:** `DAMIEN_JUDGE=rules` and `damien plan build --judge none`. A complete install
   that never calls a model — everything unresolved is **kept in the inbox** with a note
@@ -103,12 +112,18 @@ Rules run first and cost nothing. The judge only sees what your rules could not 
   ```
   Measured cost of judging the residue on a real mailbox: **≈$0.000046 a message**, so
   about **$0.05 per 1,000**, and **$0** for anything already judged (verdicts are cached).
-- **Why the model is pinned:** the confidence thresholds were tuned against one version's
-  behaviour. Changing `DAMIEN_MODEL` re-judges everything and may change how much is acted
-  on unattended. Change it deliberately. What the vendor claims about the model, and what
-  this tool relies on, is listed in the README section *Model facts this is built on*.
+- **Why the model is pinned:** thresholds are calibrated per model and host. Changing
+  `DAMIEN_MODEL` re-judges everything and, until you re-run `damien judge eval`, a pass
+  applies rules and corrections only. Change it deliberately. What the vendor claims about
+  the model, and what this tool relies on, is listed in the README section *Model facts this
+  is built on*.
+- **Calibrate:** `damien judge eval` re-judges the messages whose answer you settled,
+  prints a threshold table and the chosen `act`, and saves it to `~/.damien/calibration.json`
+  for `damien pass`. It needs at least 30 messages the model would have acted on before it
+  trusts a bar. The baseline `typesafe/jev-1.13` with no entry uses 0.9.
 
-Put it in `~/.damien/.env` (0600 — it holds a key):
+Put it in `~/.damien/.env` (0600 — it holds a key). That is the only `.env` Damien reads
+(`$DAMIEN_HOME/.env` if you moved it) — never one in the current directory:
 
 ```bash
 DAMIEN_ACCOUNT=you@gmail.com
@@ -146,7 +161,7 @@ see [`FIRST-RUN.md`](FIRST-RUN.md).
 ## 5. Prove it, then use it
 
 ```bash
-damien doctor                              # config, credentials, key, store — and the fix for anything wrong
+damien doctor                              # config, credentials, key, store — names the fix; changes nothing
 damien scan -q 'in:inbox' --limit 20       # reads only, decides nothing
 damien plan build -q 'in:inbox' --limit 200 --show 20
 ```

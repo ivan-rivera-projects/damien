@@ -297,3 +297,120 @@ def test_two_messages_with_identical_state_are_both_judged(settings, tmp_path):
         assert [v.message_id for v in verdicts] == ["id-a", "id-b"]
     finally:
         store.close()
+
+
+# ---- 0.4.0: per-backend keys, local judges, failures, the importance scale ----------
+def _ok(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, json={"answers": {"bucket": {"type": "choice", "choice": "keep", "confidence": 0.9}}})
+
+
+def _env(monkeypatch, tmp_path, **values):
+    from damien.config import load_settings
+
+    monkeypatch.setenv("DAMIEN_HOME", str(tmp_path))
+    for k in ("DAMIEN_JUDGE", "DAMIEN_JUDGE_URL", "DAMIEN_JUDGE_KEY", "TYPESAFE_API_KEY", "OPENROUTER_API_KEY",
+              "DAMIEN_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in values.items():
+        monkeypatch.setenv(k, v)
+    return load_settings()
+
+
+def test_openrouter_gets_the_openrouter_key_when_both_are_set(monkeypatch, tmp_path):
+    from damien.jev import make_judge
+
+    s = _env(monkeypatch, tmp_path, DAMIEN_JUDGE="openrouter", TYPESAFE_API_KEY="ts-secret",
+             OPENROUTER_API_KEY="or-secret")
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["authorization"])
+        return _ok(request)
+
+    judge = make_judge(s, DEFAULT_SPEC)
+    judge._client = httpx.Client(transport=httpx.MockTransport(handler))
+    judge.judge([a_message()], DEFAULT_SPEC.criteria())
+    assert seen == ["Bearer or-secret"]
+    assert "or-secret" not in json.dumps(s.redacted(), default=str)
+
+
+def test_a_local_judge_needs_its_url_and_stays_local(monkeypatch, tmp_path):
+    from damien.jev import make_judge
+
+    bare = _env(monkeypatch, tmp_path, DAMIEN_JUDGE="local", DAMIEN_JUDGE_KEY="lk")
+    assert bare.judge == "local"                         # what was asked for, not silently rules
+    assert make_judge(bare, DEFAULT_SPEC) is None
+    s = _env(monkeypatch, tmp_path, DAMIEN_JUDGE="local", DAMIEN_JUDGE_KEY="lk",
+             DAMIEN_JUDGE_URL="http://127.0.0.1:8080/v1/systemone")
+    judge = make_judge(s, DEFAULT_SPEC)
+    assert judge.url == "http://127.0.0.1:8080/v1/systemone"
+    assert s.judge_host() == "127.0.0.1" and s.judge_is_local()
+    assert "lk" not in json.dumps(s.redacted(), default=str)
+
+
+def test_a_model_judge_without_its_key_is_no_judge(monkeypatch, tmp_path):
+    from damien.jev import make_judge
+
+    s = _env(monkeypatch, tmp_path, DAMIEN_JUDGE="openrouter", TYPESAFE_API_KEY="ts-secret")
+    assert s.judge == "openrouter" and s.api_key is None   # the TypeSafe key is not borrowed
+    assert make_judge(s, DEFAULT_SPEC) is None
+
+
+def test_a_cwd_env_file_is_ignored(monkeypatch, tmp_path):
+    home, cwd = tmp_path / "home", tmp_path / "cwd"
+    home.mkdir()
+    cwd.mkdir()
+    (cwd / ".env").write_text("DAMIEN_JUDGE=openrouter\nOPENROUTER_API_KEY=planted\n")
+    monkeypatch.chdir(cwd)
+    s = _env(monkeypatch, home)
+    assert s.judge == "rules" and s.api_key is None
+
+
+def test_the_cache_key_differs_by_host(settings):
+    live = dataclasses.replace(settings, judge="openrouter", api_key="k")
+    here = dataclasses.replace(live, judge_url="http://127.0.0.1:9/v1/systemone")
+    m = a_message()
+    assert JevJudge(live, DEFAULT_SPEC).verdict_key(m, "", None) != JevJudge(here, DEFAULT_SPEC).verdict_key(m, "", None)
+
+
+def test_a_refused_call_is_not_cached_and_is_retried_next_time(settings, tmp_path):
+    from damien.store import Store, VerdictCache
+
+    live = dataclasses.replace(settings, judge="openrouter", api_key="k")
+    store = Store(tmp_path / "f.db")
+    try:
+        cache = VerdictCache(store)
+        broke = JevJudge(live, DEFAULT_SPEC, cache=cache,
+                         transport=httpx.MockTransport(lambda r: httpx.Response(402, text="no credit")))
+        [v] = broke.judge([a_message()], DEFAULT_SPEC.criteria())
+        assert v.choice == "unclear" and v.confidence == 0.0 and broke.failed == {"m1"}
+        good = JevJudge(live, DEFAULT_SPEC, cache=cache, transport=httpx.MockTransport(_ok))
+        [v] = good.judge([a_message()], DEFAULT_SPEC.criteria())
+        assert good.calls == 1 and good.cached == 0 and v.choice == "keep"
+    finally:
+        store.close()
+
+
+def test_a_reply_without_confidence_is_a_failure(settings):
+    live = dataclasses.replace(settings, judge="openrouter", api_key="k")
+    chat = httpx.MockTransport(lambda r: httpx.Response(200, json={"answers": {"bucket": {"choice": "promotion"}}}))
+    judge = JevJudge(live, DEFAULT_SPEC, transport=chat)
+    [v] = judge.judge([a_message()], DEFAULT_SPEC.criteria())
+    assert judge.failed == {"m1"} and v.choice == "unclear"
+    assert "not a decision model" in v.rationale
+
+
+def test_the_importance_guard_reads_the_scale():
+    from damien.stakes import stake_floor
+
+    m = a_message(subject="Weekly digest", label_ids=["INBOX", "UNREAD"], list_unsubscribe=True)
+    assert stake_floor(m, importance=2.0, action=Action.archive) is not None
+    assert stake_floor(m, importance=1.9, action=Action.archive) is None
+
+
+def test_the_judges_signals_reach_the_decision():
+    from damien.decide import Verdict, decide_message
+
+    v = Verdict(message_id="m1", choice="keep", confidence=0.9, signals={"wants_a_reply": 0.8})
+    d = decide_message(a_message(), rules=(), verdict=v, spec=DEFAULT_SPEC)
+    assert d.signals == {"wants_a_reply": 0.8}

@@ -34,12 +34,16 @@ Six things are worth knowing about that shape:
    choosing among the buckets (see `POLICY.md`), and every verdict is stored, so the same
    message is never judged twice for the same spec.
 4. **A decision records who made it.** `rule`, `person`, `jev` (the model) or `default` —
-   and `person` always wins over `rule`, which wins over the model.
-5. **Every write is journalled with its inverse**, so a run can be replayed backwards
-   message by message. `run undo` is that replay, not a guess.
+   and `person` always wins over `rule`, which wins over the model, in both passes.
+5. **Every write is journalled before it happens.** Each batch row is written `pending`
+   before the Gmail call and flipped to `done` after, with the state each message had when
+   the plan was built (inbox, unread, label). `run undo` replays pending and done batches and
+   restores exactly that state, not a guess; plans from before 0.4.0 fall back to the fixed
+   inverse. An undone run cannot be undone twice.
 6. **Confidence gates the automatic path.** A model decision at or above
    `DAMIEN_CONFIDENCE_ACT` (default 0.80) may be applied unattended; below it the message
-   is kept and handed to a person. Rules and your own corrections always pass.
+   is kept and handed to a person. `damien pass` uses the threshold `damien judge eval`
+   calibrated for the model and host instead. Rules and your own corrections always pass.
 
 ## The two passes
 
@@ -48,13 +52,27 @@ for different jobs.
 
 | pass | what it does | cost | when |
 |---|---|---|---|
-| `damien rules plan` | every rule Gmail can evaluate itself, as one query per rule | **free**, no model | migrating a mailbox; the scheduled pass; anything over ~10k messages |
+| `damien rules plan` | every rule, one Gmail query per translatable rule; `snippet`/`any` rules in Python | **free**, no model | migrating a mailbox; anything over ~10k messages |
 | `damien plan build` | rules, then the model on everything they left | **≈$0.05 per 1,000 judgments** | a new mailbox, or mail no rule covers yet |
 
 A hundred thousand messages are a hundred Gmail listings and a few bulk writes for the
 rules pass — about a minute. The same mailbox through `plan build` is hours and real
 money, which is why the rules pass exists and why `rules from-senders` matters: every
 sender made permanent is a sender never judged again.
+
+The rules pass keeps your corrections on top, applies `DAMIEN_PROTECT_LABELS` and the
+guardrail exclusions to every non-person rule, quotes label names in its queries, and skips
+(and prints) any rule shadowed by a Python-only rule.
+
+`damien pass weekly|monthly` is the scheduled pass: it builds a plan for the window, approves
+it in-process, and applies only rules, person corrections and model decisions at or above
+the calibrated threshold; everything else is reported as waiting. With no calibration for
+the model it applies rules and corrections only and says to run `damien judge eval`.
+
+The judge is any decision model with the Jev contract: `DAMIEN_JUDGE=openrouter`,
+`typesafe`, `local` (`DAMIEN_JUDGE_URL`; nothing leaves the machine), `rules` (no model) or
+`fake` (tests). A backend that returns no confidence is rejected, and a failed judgment is
+never cached — the message stays for a person.
 
 Measured, on this mailbox: 3,709 model calls cost **$0.1713** — about **$0.000046 a
 message**. The cache means a second pass over the same mail costs nothing.
@@ -95,6 +113,7 @@ is a credential, and treat it like one.
 - **Touch Drive, Calendar or Tasks.** Those are separate APIs with separate scopes; this
   token grants nothing in any of them.
 - **Write without a token.** `plan apply` refuses without the token minted by
-  `plan approve`, and refuses a second time on a plan already applied.
+  `plan approve` — printed once, stored only as its sha256 hash, never shown by `plan show`;
+  approving again mints a fresh one — and refuses a second time on a plan already applied.
 - **Judge a message twice for the same spec.** The verdict cache is keyed on it.
 - **Act on a low-confidence guess.** Below the threshold it keeps the message and says so.
