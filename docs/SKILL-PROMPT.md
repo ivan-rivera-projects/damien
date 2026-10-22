@@ -71,8 +71,14 @@ commands.
    applied; the plan id; the cost of any model calls; **the bodies line, always** — the pass
    prints `bodies: N read, for the messages the snippet could not settle`, or
    `bodies: 0 read — nothing needed it`, or `bodies: not read (DAMIEN_READ_BODIES=off)`;
-   and the command to apply what was left. Report that line verbatim: it is the only place
-   that says whether message text left the machine. If a pass failed part-way, say so and give `damien run undo <run_id>`.
+   and the command to apply what was left. Report those lines verbatim: the bodies line is
+   the only place that says whether message text left the machine.
+
+   **And end your report with the closing step the pass prints** — `close it  damien rules
+   from-senders <plan_id> --yes` — saying what it does: it turns each sender the pass decided
+   consistently into a rule, so that mail is never judged again and later passes cost less.
+   Run it once I have reviewed and applied the pass, never before, and never on a plan I have
+   not seen. If a pass failed part-way, say so and give `damien run undo <run_id>`.
 
 8. **The never-do list** (verbatim, these are the guardrails):
    - never `--yes` an unreviewed model slice — rules and `--min-confidence 0.9` are the allowance;

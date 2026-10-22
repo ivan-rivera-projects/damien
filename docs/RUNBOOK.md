@@ -20,6 +20,17 @@ action, the cost, what it applied, what is waiting, and the command that applies
 `--limit N` caps how much one pass looks at. Exit 0 means a pass ran (or there was nothing
 to do); exit 1 means it failed, with the reason.
 
+Every pass ends with the step that closes the loop:
+
+```bash
+damien rules from-senders <plan_id> --yes     # once you have reviewed the pass
+```
+
+It mints a rule per sender the pass decided consistently, which is what stops a mailbox being
+re-judged every week — `rules plan` is free and `plan build` is not. The pass **reports** it
+rather than running it, on purpose: minting rules from a pass nobody has read would bake model
+decisions into policy.
+
 With `DAMIEN_READ_BODIES=on_escalation`, a pass also reads the newest text of the messages it
 could not settle, and reports `bodies: N read`. That is the one mode where message text reaches
 the judge, it reads only the undecided mail, and what it read is kept locally so a re-plan costs

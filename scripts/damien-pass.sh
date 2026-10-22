@@ -126,6 +126,7 @@ if [ "$dry_run" -eq 1 ]; then
   echo "  certain   $((TOTAL - WAITING)) would be decided without you (keep is decided, not written)"
   echo "  waiting   $WAITING would be reported for a person"
   echo "  damien plan show $PLAN --sample 20"
+  echo "  close it  damien rules from-senders $PLAN --yes    # once you have reviewed this pass"
   exit 0
 fi
 
@@ -150,3 +151,8 @@ if [ "$WAITING" -gt 0 ]; then
   echo "            damien plan apply $PLAN --token \"\$token\" --yes"
 fi
 echo "undo      damien run undo $run_id"
+# The step that makes a decision permanent instead of re-judged every week. It writes rules,
+# so it is reported rather than run: minting from a pass nobody has read would bake model
+# decisions into policy.
+echo "close it  damien rules from-senders $PLAN --yes    # once you have reviewed this pass:"
+echo "            turns each sender it decided consistently into a rule, so next week judges less"
