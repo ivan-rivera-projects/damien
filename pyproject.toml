@@ -1,8 +1,26 @@
 [project]
 name = "damien"
 version = "0.1.0"
-description = "Damien v2 — a Gmail triage CLI: rules first, a System One model for judgment, code for every write."
+description = "A Gmail triage CLI that asks before it acts: rules first, a model for the residue, and journalled, reversible writes."
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ivan Rivera" }]
+keywords = ["gmail", "email", "triage", "inbox", "cli", "automation", "rules", "llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: Email",
+  "Topic :: Office/Business",
+]
 dependencies = [
   "httpx>=0.27",
   "pydantic>=2.7",
@@ -15,6 +33,11 @@ dependencies = [
 pg = ["psycopg[binary]>=3.1"]
 vectors = ["fastembed>=0.4"]
 dev = ["pytest>=8", "psycopg[binary]>=3.1"]
+
+[project.urls]
+Homepage = "https://github.com/ivan-rivera-projects/damien"
+Repository = "https://github.com/ivan-rivera-projects/damien"
+Issues = "https://github.com/ivan-rivera-projects/damien/issues"
 
 [project.scripts]
 damien = "damien.cli:main"

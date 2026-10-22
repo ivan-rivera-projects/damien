@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+      - name: test
+        # The Postgres half of the store matrix skips itself when DAMIEN_TEST_DB_URL is
+        # unset, so the suite runs on SQLite alone here. To cover both dialects in CI,
+        # add a postgres service and set DAMIEN_TEST_DB_URL.
+        run: pytest -q

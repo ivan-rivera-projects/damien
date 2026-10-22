@@ -24,6 +24,7 @@ import typer
 from . import __version__
 from .config import Settings, load_settings
 from .decide import DEFAULT_SPEC
+from .doctor import checks as doctor_checks
 from .profile import load_profile, write_profile
 from .embed import DEFAULT_SIMILARITY
 from .gmail import Gmail, GmailError
@@ -162,6 +163,38 @@ def init(force: bool = typer.Option(False, "--force", help="Overwrite what is al
     typer.echo("  3. damien login                      # Gmail, read/write in one browser tab")
     typer.echo("  4. damien plan build -q 'in:inbox' --limit 200 --show 20")
     typer.echo("  5. read it, then: damien plan approve <plan_id> && damien plan apply <plan_id> --token <t> --yes")
+
+
+@app.command()
+def doctor(json_out: bool = typer.Option(False, "--json", help="Machine-readable output.")) -> None:
+    """Check this install and name the fix for anything missing.
+
+    Changes nothing: it reads your config, profile, rules, credential and store, makes at
+    most one live Gmail call, and prints a fix beside each finding. Exits non-zero only when
+    something actually blocks you.
+    """
+    settings = _load()
+    rows = doctor_checks(settings, rules=_rules(settings, None))
+    if json_out:
+        typer.echo(json.dumps({"checks": [r.__dict__ for r in rows],
+                               "ok": not any(r.blocking for r in rows)}, indent=2))
+    else:
+        colour = {"ok": "green", "warn": "yellow", "fail": "red"}
+        mark = {"ok": "ok  ", "warn": "warn", "fail": "FAIL"}
+        typer.secho("damien doctor", bold=True)
+        for r in rows:
+            typer.secho(f"  {mark[r.status]}  {r.name:<17} {r.detail}", fg=colour[r.status])
+        blocking = sum(1 for r in rows if r.blocking)
+        soft = sum(1 for r in rows if r.status == "warn")
+        typer.echo()
+        typer.echo(f"  {len(rows)} checks: {len(rows) - blocking - soft} ok · "
+                   f"{soft} to look at · {blocking} blocking")
+        if blocking:
+            typer.secho("  the fix for each line above is in docs/SETUP.md", dim=True)
+        else:
+            typer.secho("  ready: damien plan build -q 'in:inbox' --limit 200 --show 20", dim=True)
+    if any(r.blocking for r in rows):
+        raise typer.Exit(1)
 
 
 @app.command()
